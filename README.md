@@ -88,3 +88,7 @@ For more details on building and signing `.apk` or `.aab`, refer to the [Android
 #### Transfer Sol
 
 ![demo](docs/demo/transfer-sol.gif)
+
+### Link to download the `apk` file for installation on an android smartphone
+
+https://drive.google.com/file/d/18RlN6pUlZjgy1-NZ4sq97OECLHIBgQkR/view?usp=sharing
