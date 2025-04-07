@@ -15,12 +15,18 @@
 Install dependencies from `requirements.txt`:
 
 ```
+git clone https://github.com/o5b/android-solana-wallet.git
+cd android-solana-wallet/
+python3.12 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
 Run as a desktop app:
 
 ```
+cd android-solana-wallet/
+source venv/bin/activate
 flet run
 ```
 
@@ -45,6 +51,8 @@ For more details on running the app, refer to the [Getting Started Guide](https:
 ### Android
 
 ```
+cd android-solana-wallet/
+source venv/bin/activate
 pip cache purge
 flet build apk -v
 ```
