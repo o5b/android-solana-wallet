@@ -128,7 +128,7 @@ class Transaction:
             elif isinstance(arg, TransactionInstruction):
                 self.instructions.append(arg)
             else:
-                raise ValueError("invalid instruction:", arg)
+                raise ValueError("invalid instruction arg:", arg)
 
         return self
 

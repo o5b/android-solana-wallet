@@ -63,6 +63,7 @@ def get_spl_balances(address, network, program_id):
             tokens[mint] = {
                 "amount": amount / (10 ** decimals) if decimals else amount,
                 "owner": owner,
+                "decimals": decimals,
             }
         return tokens
     else:
@@ -343,6 +344,7 @@ def get_sol_spl_balance(address: str, networks: list) -> list:
                         token_data['mint'] = mint
                         token_data['amount'] = data['amount']
                         token_data['owner'] = data['owner']
+                        token_data['decimals'] = data['decimals']
 
                         if token_2022_program_id_metadata:
                             token_data['name_2022'] = token_2022_program_id_metadata['name']

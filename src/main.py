@@ -5,6 +5,7 @@ import flet
 from solana.create_wallet import create_solana_wallet
 from solana.balance import get_sol_spl_balance, get_sol_balance
 from solana.transfer_sol import transfer_sol_token, get_min_sol_balance
+from solana.transfer_spl import transfer_spl_token
 from solana.validators import is_valid_amount, is_valid_wallet_address, is_valid_private_key, is_valid_wallet_seed_phrase
 
 # LAMPORT_TO_SOL_RATIO = 10 ** 9
@@ -279,9 +280,8 @@ def main(page: flet.Page):
                                 [
                                     flet.ElevatedButton(
                                         text="Transfer this token",
-                                        # on_click=get_balance_detail_button_click,
+                                        on_click=go_to_spl_token_page_button_click,
                                         data={
-                                            # 'wallet_address': e.control.data,
                                             'wallet_address': wallet['address_base58'],
                                             'network': r['network'],
                                             'spl_amount': spl_token['amount'],
@@ -290,8 +290,7 @@ def main(page: flet.Page):
                                             'raw_data': spl_token,
                                             'wallet_data': wallet,
                                         },
-                                        # disabled=False if (r['sol'] and spl_token['amount']) else True,
-                                        disabled=True,
+                                        disabled=False if (r['sol'] and spl_token['amount']) else True,
                                     ),
                                     flet.Text(
                                         value='',
@@ -372,6 +371,171 @@ def main(page: flet.Page):
             page.update()
 
     el_token_page = flet.Column()
+    el_spl_token_page = flet.Column()
+
+    def go_to_spl_token_page_button_click(e):
+        print(f'****** go_to_spl_token_page_button_click >> e.control.data: {e.control.data}')
+        data = e.control.data
+        el_spl_token_page.controls.clear()
+        el_spl_token_page.controls.extend(
+            [
+                flet.Row(
+                    [
+                        flet.Text(
+                            value='',
+                            selectable=True,
+                            spans=[
+                                flet.TextSpan('Network: ', flet.TextStyle(size=16)),
+                                flet.TextSpan(f'{data["network"]} ', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
+                            ]
+                        ),
+                    ],
+                ),
+                flet.Row(
+                    [
+                        flet.Text(
+                            value='',
+                            selectable=True,
+                            spans=[
+                                flet.TextSpan('From Address: ', flet.TextStyle(size=16)),
+                                flet.TextSpan(f'{data["wallet_address"]} ', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
+                            ]
+                        ),
+                    ],
+                ),
+                flet.Row(
+                    [
+                        flet.Text(
+                            value='',
+                            selectable=True,
+                            spans=[
+                                flet.TextSpan('Token: ', flet.TextStyle(size=16)),
+                                flet.TextSpan(f'{data["symbol"]} ', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
+                            ]
+                        ),
+                    ],
+                ),
+                flet.Row(
+                    [
+                        flet.Text(
+                            value='',
+                            selectable=True,
+                            spans=[
+                                flet.TextSpan('Amount: ', flet.TextStyle(size=16)),
+                                flet.TextSpan(f'{data["spl_amount"]} ', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
+                            ]
+                        ),
+                    ],
+                ),
+                flet.Row(
+                    [
+                        flet.TextField(label="Input the amount", min_lines=1, max_lines=1, max_length=20)
+                    ],
+                ),
+                flet.Row(
+                    [
+                        flet.TextField(label="Enter the recipient's address", min_lines=1, max_lines=1, max_length=100)
+                    ],
+                ),
+                flet.Row(
+                    [
+                        flet.ElevatedButton(
+                            text="Transfer Token",
+                            on_click=transfer_spl_button_click,
+                            data=data,
+                        ),
+                    ],
+                ),
+                flet.Column(),
+            ]
+        )
+        if not data['wallet_data']['private_key_hex']:
+             el_spl_token_page.controls.insert(
+                6,
+                flet.Row(
+                    [
+                        flet.TextField(label="Enter Secret (12/24 Words or Private Key)", min_lines=1, max_lines=1, max_length=100)
+                    ],
+                )
+            )
+        page.go("spl-token-page")
+
+    def transfer_spl_button_click(e):
+        data = e.control.data
+        e.control.disabled = True
+        e.control.parent.parent.controls[-1].controls.clear()
+        e.control.parent.parent.controls[-1].controls.append(
+            flet.Row([flet.ProgressRing(), flet.Text("PLEASE WAIT")], alignment=flet.MainAxisAlignment.CENTER)
+        )
+        page.update()
+
+        alert_dialog_text = ''
+        private_key_hex = data['wallet_data']['private_key_hex']
+
+        if not private_key_hex:
+            input_secret = e.control.parent.parent.controls[6].controls[0].value.strip()
+            if is_valid_wallet_seed_phrase(input_secret):
+                for attempt in range(10):
+                    words, wallet_address_base58, secret_key_base58, new_private_key_hex, public_key_hex, error = create_solana_wallet(secret=input_secret)
+                    if wallet_address_base58 == data['wallet_data']['address_base58']:
+                        private_key_hex = new_private_key_hex
+                        break
+                    elif error:
+                        alert_dialog_text = f"Error getting private key: {error}"
+                else:
+                    alert_dialog_text = "Failed to get private key from seed phrase."
+            elif is_valid_private_key(input_secret):
+                 if len(input_secret) == 64:
+                    private_key_hex = input_secret
+            else:
+                alert_dialog_text = "Invalid secret."
+
+        if private_key_hex:
+            recipient_address = e.control.parent.parent.controls[5].controls[0].value
+            if is_valid_wallet_address(recipient_address):
+                transfer_amount_str = e.control.parent.parent.controls[4].controls[0].value
+                if is_valid_amount(transfer_amount_str):
+                    transfer_amount = float(transfer_amount_str)
+                    if 0 < transfer_amount <= data['spl_amount']:
+                        print("------ DEBUG: transfer_spl_token call ------")
+                        print(f"sender_address: {data['wallet_address']}")
+                        print(f"recipient_address: {recipient_address}")
+                        print(f"mint_address: {data['raw_data']['mint']}")
+                        print(f"amount: {transfer_amount}")
+                        print(f"decimals: {data['raw_data']['decimals']}")
+                        print(f"network: {data['network']}")
+                        print("------------------------------------------")
+                        result = transfer_spl_token(
+                            sender_address=data['wallet_address'],
+                            sender_private_key=private_key_hex,
+                            recipient_address=recipient_address,
+                            mint_address=data['raw_data']['mint'],
+                            amount=transfer_amount,
+                            decimals=data['raw_data']['decimals'],
+                            network=data['network'],
+                            program_id=data['raw_data']['program_id']
+                        )
+                        if 'result' in result:
+                            alert_dialog_text = f"Transfer of {transfer_amount} {data['symbol']} was successful!"
+                        elif 'error' in result:
+                            alert_dialog_text = f"Transfer Error: {result['error']}"
+                        else:
+                            alert_dialog_text = "Transfer failed for an unknown reason."
+                    else:
+                        alert_dialog_text = "Invalid transfer amount."
+                else:
+                    alert_dialog_text = "Invalid amount format."
+            else:
+                alert_dialog_text = "Invalid recipient address."
+
+        if not alert_dialog_text:
+             alert_dialog_text = "Could not proceed with transfer. Private key is missing or invalid."
+
+        page.open(flet.AlertDialog(title=flet.Text(alert_dialog_text)))
+        e.control.parent.parent.controls[-1].controls.clear()
+        e.control.disabled = False
+        page.update()
+
 
     def go_to_token_page_button_click(e):
         print(f'****** go_to_token_page_button_click >> e.control.data: {e.control.data}')
@@ -1160,6 +1324,8 @@ def main(page: flet.Page):
             page.views.append(address_page)
         elif page.route == "token-page":
             page.views.append(token_page)
+        elif page.route == "spl-token-page":
+            page.views.append(spl_token_page)
         # else:
         #     page.views.append(homepage)
         page.update()
@@ -1358,6 +1524,23 @@ def main(page: flet.Page):
         controls=[
             flet.Text('Information:', size=30, font_family="Georgia"),
             el_token_page,
+        ]
+    )
+
+    spl_token_page = flet.View(
+        route="spl-token-page",
+        appbar=flet.AppBar(
+            title=flet.Text("SPL Token Transfer"),
+            color="white",
+            bgcolor="purple",
+            leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
+        ),
+        navigation_bar=navbar,
+        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
+        scroll=flet.ScrollMode.AUTO,
+        controls=[
+            flet.Text('Transfer SPL Token', size=30, font_family="Georgia"),
+            el_spl_token_page,
         ]
     )
 
