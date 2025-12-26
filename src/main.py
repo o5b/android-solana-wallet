@@ -265,7 +265,8 @@ def main(page: flet.Page):
             tmp_balance_result = []
             start = datetime.now()
             result = get_sol_spl_balance(wallet['address_base58'], networks)
-            print(f'****** result: {result}')
+            print(f'****** get_sol_spl_balance result: {result}')
+
             for i, r in enumerate(result):
                 tmp_balance_spl = []
                 for spl_token in r['spl']:
@@ -290,7 +291,8 @@ def main(page: flet.Page):
                                             'raw_data': spl_token,
                                             'wallet_data': wallet,
                                         },
-                                        disabled=False if (r['sol'] and spl_token['amount']) else True,
+                                        # disabled=False if (r['sol'] and spl_token['amount']) else True,
+                                        disabled=False if (r['sol'] and spl_token['amount'] and r['sol'] > spl_token['transfer_cost']["total_sol"]) else True,
                                     ),
                                     flet.Text(
                                         value='',

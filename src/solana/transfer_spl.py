@@ -1,5 +1,6 @@
 from typing import Dict
 import base58
+import base64
 import requests
 import pprint
 
@@ -100,6 +101,9 @@ def transfer_spl_token(
 
         pprint.pp(f' instruction_create_associated_token_account: {instruction_create_associated_token_account}')
         pprint.pp(f' instruction_transfer: {instruction_transfer}')
+
+        print(f'txn.serialize: {txn.serialize()}')
+        print(f'txn.serialize base64: {base64.b64encode(txn.serialize()).decode("utf-8")}')
 
         url = network
         headers = {"Content-Type": "application/json"}

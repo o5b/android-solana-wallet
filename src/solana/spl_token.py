@@ -5,7 +5,6 @@ import requests
 import time
 # import traceback
 from typing import List, Optional, Union, cast, Dict, Any, NamedTuple
-# from dataclasses import dataclass
 import pprint
 
 # from .publickey import PublicKey
@@ -190,7 +189,6 @@ def transfer_checked(params: TransferCheckedParams) -> TransactionInstruction:
 
     # return TransactionInstruction(accounts=keys, program_id=params.program_id, data=data)
     return TransactionInstruction(keys=keys, program_id=params.program_id, data=data)
-
 
 
 def get_token_account(owner: PublicKey, mint: PublicKey, program_id: PublicKey, network: str) -> PublicKey | None:

@@ -6,8 +6,10 @@ import json
 import base64
 import struct
 import base58
+from dataclasses import dataclass
 
 from .publickey import PublicKey
+
 
 def get_sol_balance(address, network):
     # url = f"https://api.{network}.solana.com"
@@ -29,6 +31,7 @@ def get_sol_balance(address, network):
         # raise Exception(f"Error get_sol_balance: {error_message}")
         print(f"Error get_sol_balance: {error_message} \nHeaders: {response.headers}")
     return None
+
 
 def get_spl_balances(address, network, program_id):
     # url = f"https://api.{network}.solana.com"
@@ -88,6 +91,7 @@ def get_spl_balances(address, network, program_id):
         """
     return None
 
+
 def get_account_info(address, network):
     # url = f"https://api.{network}.solana.com"
     url = network
@@ -106,11 +110,13 @@ def get_account_info(address, network):
     response = requests.post(url, headers=headers, json=payload)
     if response.status_code == 200:
         # print(f"*** get_account_info >> Headers: {response.headers}")
+        # print(f'get_account_info response.json(): {response.json()}')
         return response.json().get("result", {}).get("value", [])
     else:
         error_message = response.text
         print(f"Error get_account_info: {error_message} \nHeaders: {response.headers}")
     return None
+
 
 def decode_metadata(data: list[str, str]) -> str | None:
     if len(data) == 2:
@@ -119,6 +125,7 @@ def decode_metadata(data: list[str, str]) -> str | None:
         elif data[1] == 'base58':
             return base58.b58decode(data[0])
     return None
+
 
 def get_metadata_pda(mint_address: str) -> str:
     # Metaplex Token Metadata Program ID
@@ -132,6 +139,7 @@ def get_metadata_pda(mint_address: str) -> str:
     ]
     metadata_pda, _ = PublicKey.find_program_address(seeds, program_id_pubkey)
     return str(metadata_pda)
+
 
 def parse_metadata_2022_program_id(data: bytes):
     metadata = {
@@ -210,6 +218,7 @@ def parse_metadata_2022_program_id(data: bytes):
 
     return metadata
 
+
 def parse_metadata_metaplex(data: bytes):
     metadata = {
         # "mint_authority": "",
@@ -266,6 +275,7 @@ def parse_metadata_metaplex(data: bytes):
         metadata["uri"] = uri
 
     return metadata
+
 
 def get_sol_spl_balance(address: str, networks: list) -> list:
     result = []
@@ -346,6 +356,16 @@ def get_sol_spl_balance(address: str, networks: list) -> list:
                         token_data['owner'] = data['owner']
                         token_data['decimals'] = data['decimals']
 
+                        transfer_cost = calculate_total_transfer_cost(
+                            # sender_pubkey=sender_pubkey,
+                            # recipient_pubkey=PublicKey(address),
+                            mint_pubkey=PublicKey(mint),
+                            # program_id=program_id_pubkey,
+                            network=network,
+                            # cu_limit: int = 80000
+                        )
+                        token_data['transfer_cost'] = transfer_cost
+
                         if token_2022_program_id_metadata:
                             token_data['name_2022'] = token_2022_program_id_metadata['name']
                             token_data['symbol_2022'] = token_2022_program_id_metadata['symbol']
@@ -365,3 +385,119 @@ def get_sol_spl_balance(address: str, networks: list) -> list:
                 print(f"Ошибка при получении SPL токенов (Program ID: {program_id})")
         result.append(network_result)
     return result
+
+
+# @dataclass
+# class TransactionCost:
+#     total_sol: float
+#     total_lamports: int
+#     base_fee: int
+#     rent_fee: int
+#     priority_fee: int
+#     will_create_ata: bool
+
+
+def calculate_total_transfer_cost(
+    mint_pubkey: PublicKey,
+    network: str,
+    sender_pubkey: PublicKey | None = None,
+    recipient_pubkey: PublicKey | None = None,
+    program_id: PublicKey | None = None,
+    cu_limit: int = 80000
+) -> dict: # TransactionCost:
+    # чтобы точно определить, хватит ли пользователю SOL, ваша логика должна выглядеть так:
+    # TotalCost = BaseFee + Rent + (ComputeUnitLimit * ComputeUnitPrice) / 1,000,000
+    # Где:BaseFee: 5,000 лампорт.
+    # Rent: 2,039,280 лампорт (если создаем ATA).
+    # Priority: Рассчитанная нами добавка.
+    # Compute Unit Limit: Всегда указывайте его явно. Если не указать, Solana зарезервирует 200,000 CU, что сделает транзакцию дороже для оценки сетью и может замедлить её включение в блок.
+    # Compute Unit Price: Если сеть "летит", можно ставить 1. Если сеть перегружена (например, во время популярного минта NFT), цена может взлетать до 500,000 и выше.
+
+    # 1. Базовая комиссия сети (за 1 подпись)
+    base_fee = 5000
+
+    # 2. Проверка необходимости создания ATA (Rent)
+    # recipient_ata = get_associated_token_address(
+    #     owner=recipient_pubkey,
+    #     mint=mint_pubkey,
+    #     token_program_id=program_id
+    # )
+    # print(f'recipient_ata: {recipient_ata}')
+
+    # acc_info = get_account_info(f'{recipient_ata}', network)
+    # print(f'acc_info: {acc_info}')
+
+    # Стоимость аренды (Rent Exemption) для токенного аккаунта фиксирована
+    # Можно запросить через client.get_minimum_balance_for_rent_exemption(165)
+    # 165 байт — это фиксированный размер для SPL Token Account (аккаунта, который хранит информацию о ваших токенах: какой это токен, кто владелец и сколько их на балансе).
+    # 50 байт (или другие малые значения) обычно приводятся в учебных примерах
+    # rent_fee = 2039280 if acc_info is None else 0
+    # will_create_ata = acc_info is None
+    rent_fee = 2039280
+    will_create_ata = True # по умолчанию считаем что нужно создать ATA
+
+    # 3. Расчет Priority Fee
+    # Получаем среднюю цену за юнит и умножаем на лимит вычислений
+    unit_price = get_priority_fees(mint_pubkey, network)
+    print(f'unit_price: {unit_price}')
+    # Формула: (Limit * Price) / 1,000,000 (перевод из micro-lamports в lamports)
+    priority_fee_lamports = (cu_limit * unit_price) // 1_000_000
+
+    # 4. Итого
+    total_lamports = base_fee + rent_fee + priority_fee_lamports
+    total_sol = total_lamports / 1_000_000_000 # В 1 SOL миллиард лампортов
+
+    cost = dict(
+        total_sol=total_sol,
+        total_lamports=total_lamports,
+        base_fee=base_fee,
+        rent_fee=rent_fee,
+        priority_fee=priority_fee_lamports,
+        will_create_ata=will_create_ata
+    )
+
+    # return TransactionCost(
+    #     total_sol=total_sol,
+    #     total_lamports=total_lamports,
+    #     base_fee=base_fee,
+    #     rent_fee=rent_fee,
+    #     priority_fee=priority_fee_lamports,
+    #     will_create_ata=will_create_ata
+    # )
+    return cost
+
+
+
+def get_priority_fees(mint_pubkey: PublicKey, network: str) -> int:
+    # Запрашиваем последние комиссии для конкретного токена/аккаунта
+    # Это дает наиболее точную картину "пробок" в конкретном секторе сети
+    fees = []
+    url = network
+    headers = {"Content-Type": "application/json"}
+    payload =    {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getRecentPrioritizationFees",
+        "params": [
+            [f"{mint_pubkey}"]
+        ]
+    }
+
+    # print(f'payload: {payload}')
+    response = requests.post(url, headers=headers, json=payload)
+    # print(f'response status getRecentPrioritizationFees: {response}')
+
+    if response.status_code == 200:
+        response_json = response.json()
+        # print('***********response_json getRecentPrioritizationFees:')
+        # pprint.pp(response_json)
+
+        if "result" in response_json:
+            fees = [fee["prioritizationFee"] for fee in response_json["result"]]
+
+    if not fees:
+        return 1000 # Минимальное значение по умолчанию
+    else:
+        # Берем максимум (для быстрой обработки)
+        fees.sort()
+        return int(fees[-1]) # Максимальное из полученных значений
