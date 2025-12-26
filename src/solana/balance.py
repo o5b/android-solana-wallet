@@ -149,73 +149,77 @@ def parse_metadata_2022_program_id(data: bytes):
         "mint": "",
         "name": "",
         "symbol": "",
-        "uri": ""
+        "uri": "",
+        "error": ""
     }
 
-    offset = 0
+    try:
+        offset = 0
 
-    # Пропускаем первые 4 байта (версия или флаг)
-    #offset += 4
+        # Пропускаем первые 4 байта (версия или флаг)
+        #offset += 4
 
-    if len(data) > 314:
-        # Пропускаем первые 238 байт
-        offset += 238
+        if len(data) > 314:
+            # Пропускаем первые 238 байт
+            offset += 238
 
-        # Декодируем update_authority (32 байта)
-        update_authority = base58.b58encode(data[offset:offset + 32]).decode()
-        offset += 32
+            # Декодируем update_authority (32 байта)
+            update_authority = base58.b58encode(data[offset:offset + 32]).decode()
+            offset += 32
 
-        # Декодируем mint (32 байта)
-        mint = base58.b58encode(data[offset:offset + 32]).decode()
-        offset += 32
+            # Декодируем mint (32 байта)
+            mint = base58.b58encode(data[offset:offset + 32]).decode()
+            offset += 32
 
-        # Декодируем длину имени (4 байта) и само имя
-        name_length = struct.unpack_from("<I", data, offset)[0]
-        print(f'name_length: {name_length}')
-        offset += 4
-        name = data[offset:offset + name_length].decode()
-        offset += name_length
+            # Декодируем длину имени (4 байта) и само имя
+            name_length = struct.unpack_from("<I", data, offset)[0]
+            print(f'name_length: {name_length}')
+            offset += 4
+            name = data[offset:offset + name_length].decode()
+            offset += name_length
 
-        # Декодируем длину символа (4 байта) и сам символ
-        symbol_length = struct.unpack_from("<I", data, offset)[0]
-        print(f'symbol_length: {symbol_length}')
-        offset += 4
-        symbol = data[offset:offset + symbol_length].decode()
-        offset += symbol_length
+            # Декодируем длину символа (4 байта) и сам символ
+            symbol_length = struct.unpack_from("<I", data, offset)[0]
+            print(f'symbol_length: {symbol_length}')
+            offset += 4
+            symbol = data[offset:offset + symbol_length].decode()
+            offset += symbol_length
 
-        # Декодируем длину URI (4 байта) и сам URI
-        uri_length = struct.unpack_from("<I", data, offset)[0]
-        print(f'uri_length: {uri_length}')
-        offset += 4
-        uri = data[offset:offset + uri_length].decode()
-        offset += uri_length
+            # Декодируем длину URI (4 байта) и сам URI
+            uri_length = struct.unpack_from("<I", data, offset)[0]
+            print(f'uri_length: {uri_length}')
+            offset += 4
+            uri = data[offset:offset + uri_length].decode()
+            offset += uri_length
 
-        metadata["update_authority"] = update_authority
-        metadata["mint"] = mint
-        metadata["name"] = name
-        metadata["symbol"] = symbol
-        metadata["uri"] = uri
+            metadata["update_authority"] = update_authority
+            metadata["mint"] = mint
+            metadata["name"] = name
+            metadata["symbol"] = symbol
+            metadata["uri"] = uri
 
-    # else:
-    #     # Пропускаем первые 4 байта (версия или флаг)
-    #     offset += 4
+        # else:
+        #     # Пропускаем первые 4 байта (версия или флаг)
+        #     offset += 4
 
-    #     # Декодируем mint_authority (32 байта)
-    #     mint_authority = base58.b58encode(data[offset:offset + 32]).decode()
-    #     offset += 32
+        #     # Декодируем mint_authority (32 байта)
+        #     mint_authority = base58.b58encode(data[offset:offset + 32]).decode()
+        #     offset += 32
 
-    #     # TODO: непонятные данные, ex.: b'\xb2\xde;\x8f\x06\xf7\xbb\x98\x06\x01'
-    #     offset += 10
+        #     # TODO: непонятные данные, ex.: b'\xb2\xde;\x8f\x06\xf7\xbb\x98\x06\x01'
+        #     offset += 10
 
-    #     # Пропускаем следующие 4 байта (версия или флаг)
-    #     offset += 4
+        #     # Пропускаем следующие 4 байта (версия или флаг)
+        #     offset += 4
 
-    #     freeze_authority = base58.b58encode(data[offset:offset + 32]).decode()
-    #     offset += 32
+        #     freeze_authority = base58.b58encode(data[offset:offset + 32]).decode()
+        #     offset += 32
 
-    #     metadata["mint_authority"] = mint_authority
-    #     metadata["freeze_authority"] = freeze_authority
-
+        #     metadata["mint_authority"] = mint_authority
+        #     metadata["freeze_authority"] = freeze_authority
+    except Exception as er:
+        print(f"***** Error parse_metadata_2022_program_id: {er} ")
+        metadata["error"] = er
     return metadata
 
 
@@ -227,53 +231,58 @@ def parse_metadata_metaplex(data: bytes):
         "mint": "",
         "name": "",
         "symbol": "",
-        "uri": ""
+        "uri": "",
+        "error": ""
     }
 
-    offset = 0
+    try:
+        offset = 0
 
-    if len(data) == 679:
-        # Пропускаем первый байт (версия или флаг)
-        offset += 1
+        if len(data) == 679:
+            # Пропускаем первый байт (версия или флаг)
+            offset += 1
 
-        # Декодируем update_authority (32 байта)
-        update_authority = base58.b58encode(data[offset:offset + 32]).decode()
-        offset += 32
+            # Декодируем update_authority (32 байта)
+            update_authority = base58.b58encode(data[offset:offset + 32]).decode()
+            offset += 32
 
-        # Декодируем mint (32 байта)
-        mint = base58.b58encode(data[offset:offset + 32]).decode()
-        offset += 32
+            # Декодируем mint (32 байта)
+            mint = base58.b58encode(data[offset:offset + 32]).decode()
+            offset += 32
 
-        # Декодируем длину имени (4 байта) и само имя
-        name_length = struct.unpack_from("<I", data, offset)[0]
-        print(f'name_length: {name_length}')
-        offset += 4
-        # name = data[offset:offset + name_length].decode()
-        name = data[offset:offset + name_length].replace(b'\x00', b'').decode()
-        offset += name_length
+            # Декодируем длину имени (4 байта) и само имя
+            name_length = struct.unpack_from("<I", data, offset)[0]
+            print(f'name_length: {name_length}')
+            offset += 4
+            # name = data[offset:offset + name_length].decode()
+            name = data[offset:offset + name_length].replace(b'\x00', b'').decode()
+            offset += name_length
 
-        # Декодируем длину символа (4 байта) и сам символ
-        symbol_length = struct.unpack_from("<I", data, offset)[0]
-        print(f'symbol_length: {symbol_length}')
-        offset += 4
-        # symbol = data[offset:offset + symbol_length].decode()
-        symbol = data[offset:offset + symbol_length].replace(b'\x00', b'').decode()
-        offset += symbol_length
+            # Декодируем длину символа (4 байта) и сам символ
+            symbol_length = struct.unpack_from("<I", data, offset)[0]
+            print(f'symbol_length: {symbol_length}')
+            offset += 4
+            # symbol = data[offset:offset + symbol_length].decode()
+            symbol = data[offset:offset + symbol_length].replace(b'\x00', b'').decode()
+            offset += symbol_length
 
-        # Декодируем длину URI (4 байта) и сам URI
-        uri_length = struct.unpack_from("<I", data, offset)[0]
-        print(f'uri_length: {uri_length}')
-        offset += 4
-        # uri = data[offset:offset + uri_length].decode()
-        uri = data[offset:offset + uri_length].replace(b'\x00', b'').decode()
-        offset += uri_length
+            # Декодируем длину URI (4 байта) и сам URI
+            uri_length = struct.unpack_from("<I", data, offset)[0]
+            print(f'uri_length: {uri_length}')
+            offset += 4
+            # uri = data[offset:offset + uri_length].decode()
+            uri = data[offset:offset + uri_length].replace(b'\x00', b'').decode()
+            offset += uri_length
 
-        metadata["update_authority"] = update_authority
-        metadata["mint"] = mint
-        metadata["name"] = name
-        metadata["symbol"] = symbol
-        metadata["uri"] = uri
+            metadata["update_authority"] = update_authority
+            metadata["mint"] = mint
+            metadata["name"] = name
+            metadata["symbol"] = symbol
+            metadata["uri"] = uri
 
+    except Exception as er:
+        print(f"***** Error parse_metadata_metaplex: {er} ")
+        metadata["error"] = er
     return metadata
 
 
@@ -371,6 +380,7 @@ def get_sol_spl_balance(address: str, networks: list) -> list:
                             token_data['symbol_2022'] = token_2022_program_id_metadata['symbol']
                             token_data['uri_2022'] = token_2022_program_id_metadata['uri']
                             token_data['update_authority_2022'] = token_2022_program_id_metadata['update_authority']
+                            token_data['error'] = token_2022_program_id_metadata['error']
 
                         if token_metaplex_metadata:
                             token_data['name_metaplex'] = token_metaplex_metadata['name']
@@ -378,6 +388,7 @@ def get_sol_spl_balance(address: str, networks: list) -> list:
                             token_data['uri_metaplex'] = token_metaplex_metadata['uri']
                             token_data['update_authority_metaplex'] = token_metaplex_metadata['update_authority']
                             token_data['metadata_pda_address'] = metadata_pda_address
+                            token_data['error'] = token_metaplex_metadata['error']
 
                         network_result['spl'].append(token_data)
 
