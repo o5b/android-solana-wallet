@@ -15,6 +15,8 @@ from solana.transaction import Transaction, TransactionInstruction, AccountMeta
 from solana.layouts import INSTRUCTIONS_LAYOUT, InstructionType
 # from solana.message import Message
 from solana.types import TokenAccountOpts
+from solana.commitment import Commitment, Finalized
+from solana.transfer_sol import confirm_transaction
 
 # Program IDs
 TOKEN_PROGRAM_ID = PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
@@ -258,3 +260,74 @@ def get_token_account(owner: PublicKey, mint: PublicKey, program_id: PublicKey, 
     except Exception as error:
         print(f"Failed to get_token_account: {error}")
         return None
+
+
+def request_airdrop(pubkey: PublicKey, lamports: int, network: str, commitment: Commitment = Finalized):
+    print(f'****** request_airdrop >> commitment: {commitment}')
+    try:
+        url = network
+        headers = {"Content-Type": "application/json"}
+        # {
+        #     "jsonrpc": "2.0",
+        #     "id": 1,
+        #     "method": "requestAirdrop",
+        #     "params": [
+        #     "83astBRguLMdt2h5U1Tpdq5tjFoJ6noeGwaY3mDLVcri",
+        #     1000000000,
+        #     {
+        #         "commitment": "finalized"
+        #     }
+        #     ]
+        # }
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "requestAirdrop",
+            "params": [
+                f"{pubkey}",
+                lamports,
+                {
+                    "commitment": commitment
+                }
+            ]
+        }
+        print(f'payload: {payload}')
+        print("\n--- Sending requestAirdrop ---")
+        response = requests.post(url, headers=headers, json=payload)
+        print(f'response requestAirdrop: {response}')
+        print(f'response requestAirdrop headers: {response.headers}')
+
+        if response.status_code == 200:
+            response_json = response.json()
+            print('***********response_json 200:')
+            pprint.pp(response_json)
+            if response_json:
+                if "result" in response_json:
+                    if response_json["result"]:
+                        try:
+                            confirm_tx_res = confirm_transaction(tx_sig=response_json["result"], network=network)
+                            print(f'confirm_transaction: {confirm_tx_res}')
+                        except Exception as er:
+                            print(f"Failed to confirm_transaction: {er}")
+                        return response_json["result"]
+                elif "error" in response_json:
+                    return f'Error: {response_json["error"]}'
+                else:
+                    return response_json
+
+        elif response.status_code == 429:
+            # <Response [429]>
+            # response headers: {'access-control-max-age': '86400', 'content-length': '220', 'access-control-allow-methods': 'POST, GET, OPTIONS', 'access-control-allow-origin': '*', 'content-type': 'application/json', 'cache-control': 'no-cache', 'retry-after': '86400', 'x-rpc-node': 'ams267', 'x-ratelimit-airdrop-limit': '1', 'x-ratelimit-airdrop-remaining': '-2', 'x-ratelimit-tier': 'free', 'x-ratelimit-method-limit': '1', 'x-ratelimit-method-remaining': '0', 'x-ratelimit-rps-limit': '50', 'x-ratelimit-rps-remaining': '50', 'x-ratelimit-endpoint-limit': 'unlimited', 'x-ratelimit-endpoint-remaining': '-935', 'x-ratelimit-conn-limit': '40', 'x-ratelimit-conn-remaining': '40', 'x-ratelimit-connrate-limit': '40', 'x-ratelimit-connrate-remaining': '40', 'x-ratelimit-pubsub-limit': '50', 'x-ratelimit-pubsub-remaining': '50', 'connection': 'close'}
+            response_json = response.json()
+            print('***********response_json 429 :')
+            pprint.pp(response_json)
+            if response_json:
+                if "error" in response_json:
+                    return f'Error: {response_json["error"]}, retry-after: {response.headers["retry-after"]} seconds.'
+            elif 'retry-after' in response.headers:
+                return f'Error: Too Many Requests, retry-after: {response.headers["retry-after"]} seconds.'
+
+        return None
+    except Exception as error:
+        print(f"Failed to get_token_account: {error}")
+        return f"Failed to get_token_account: {error}"

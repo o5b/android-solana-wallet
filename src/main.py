@@ -6,6 +6,7 @@ from solana.create_wallet import create_solana_wallet
 from solana.balance import get_sol_spl_balance, get_sol_balance
 from solana.transfer_sol import transfer_sol_token, get_min_sol_balance
 from solana.transfer_spl import transfer_spl_token
+from solana.spl_token import request_airdrop
 from solana.validators import is_valid_amount, is_valid_wallet_address, is_valid_private_key, is_valid_wallet_seed_phrase
 
 # LAMPORT_TO_SOL_RATIO = 10 ** 9
@@ -314,6 +315,22 @@ def main(page: flet.Page):
                             ),
                         ]
                     )
+                tmp_request_airdrop = []
+                if r['network'] == "https://api.testnet.solana.com" or r['network'] == "https://api.devnet.solana.com":
+                    tmp_request_airdrop.append(
+                        flet.ElevatedButton(
+                            text="Request Airdrop 1 SOL",
+                            on_click=request_airdrop_sol_button_click,
+                            data={
+                                'wallet_address': wallet['address_base58'],
+                                'network': r['network'],
+                                'sol_amount': r['sol'],
+                                'symbol': 'SOL',
+                                'wallet_data': wallet,
+                            },
+                            disabled=False,
+                        ),
+                    )
                 tmp_balance_result.extend(
                     [
                         flet.Row(
@@ -346,6 +363,7 @@ def main(page: flet.Page):
                                         flet.TextSpan(' SOL', flet.TextStyle(size=16)),
                                     ]
                                 ),
+                                *tmp_request_airdrop,
                             ],
                         ),
                         *tmp_balance_spl,
@@ -374,6 +392,7 @@ def main(page: flet.Page):
 
     el_token_page = flet.Column()
     el_spl_token_page = flet.Column()
+
 
     def go_to_spl_token_page_button_click(e):
         print(f'****** go_to_spl_token_page_button_click >> e.control.data: {e.control.data}')
@@ -461,6 +480,7 @@ def main(page: flet.Page):
                 )
             )
         page.go("spl-token-page")
+
 
     def transfer_spl_button_click(e):
         data = e.control.data
@@ -614,6 +634,7 @@ def main(page: flet.Page):
                 )
             )
         page.go("token-page")
+
 
     def transfer_sol_button_click(e):
         data = e.control.data
@@ -800,6 +821,39 @@ def main(page: flet.Page):
                 ),
             ]
         )
+        e.control.disabled = False  # разблокируем кнопку
+        page.update()
+
+
+    def request_airdrop_sol_button_click(e):
+        data = e.control.data
+        print(f'****** request_airdrop_sol_button_click >> e.control.data: {data}')
+        e.control.disabled = True  # блокируем кнопку
+        e.control.parent.parent.controls[-1].controls.clear()
+        e.control.parent.parent.controls[-1].controls.append(
+            flet.Row([flet.ProgressRing(), flet.Text("PLEASE WAIT")], alignment=flet.MainAxisAlignment.CENTER)
+        )
+        page.update()
+        result_transfer_txt = ''
+        sol_balance_after = ''
+        alert_dialog_text = f"Not Result request airdrop sol for wallet: {data['wallet_address']}"
+        transfer_sol_amount = ''
+        recipient_address = ''
+
+        if is_valid_wallet_address(data['wallet_address']):
+            result = request_airdrop(pubkey=data['wallet_address'], lamports=1_000_000_000, network=data['network'])
+
+            alert_dialog_text = f"The result airdrop SOL for wallet address: {data['wallet_address']}: {result}"
+
+        page.open(
+            flet.AlertDialog(
+                title=flet.Text(alert_dialog_text),
+            )
+        )
+
+        # e.control.parent.parent.controls[3].controls[0].value = ''
+        e.control.parent.parent.controls[-1].controls.clear()
+
         e.control.disabled = False  # разблокируем кнопку
         page.update()
 
