@@ -271,6 +271,8 @@ def main(page: flet.Page):
             for i, r in enumerate(result):
                 tmp_balance_spl = []
                 for spl_token in r['spl']:
+                    if spl_token['amount'] <= 0:
+                        continue
                     token_symbol = ''
                     if 'symbol_metaplex' in spl_token:
                         token_symbol += f'{spl_token['symbol_metaplex']} (symbol_metaplex) '
@@ -304,12 +306,30 @@ def main(page: flet.Page):
                                     ),
                                 ],
                             ),
-                            flet.Row(
-                                scroll=flet.ScrollMode.AUTO,
-                                controls=[
-                                    flet.Text(
-                                        value=f'{spl_token}',
-                                        size=12,
+                            # flet.Row(
+                            #     scroll=flet.ScrollMode.AUTO,
+                            #     controls=[
+                            #         flet.Text(
+                            #             value=f'{spl_token}',
+                            #             size=12,
+                            #         ),
+                            #     ],
+                            # ),
+                            flet.Column(
+                                [
+                                    flet.Row(
+                                        [
+                                            flet.TextButton(
+                                                content=flet.Row(
+                                                    [
+                                                        flet.Icon(name=flet.Icons.ARROW_DROP_DOWN, size=50),
+                                                    ],
+                                                ),
+                                                on_click=spl_token_arrow_drop_down_button_click,
+                                                data=spl_token,
+                                            ),
+                                        ],
+                                        alignment=flet.MainAxisAlignment.CENTER,
                                     ),
                                 ],
                             ),
@@ -369,7 +389,7 @@ def main(page: flet.Page):
                         *tmp_balance_spl,
                     ]
                 )
-                if i < len(result) - 1:     # добавляем разделяющую линию после каждого результата кроме последнего
+                if i < len(result) - 1: # добавляем разделяющую линию после каждого результата кроме последнего
                     tmp_balance_result.append(flet.Divider(thickness=1))
             el_token_balance_data.controls.clear()
             el_token_balance_data.controls.extend([flet.Divider(thickness=3), *tmp_balance_result])
@@ -393,6 +413,123 @@ def main(page: flet.Page):
     el_token_page = flet.Column()
     el_spl_token_page = flet.Column()
 
+    def spl_token_arrow_drop_down_button_click(e):
+        try:
+            data = e.control.data
+            print(f'****** spl_token_arrow_drop_down_button_click >> data: {data}')
+            print(f"*** data len: {len(data)}")
+            print(f"*** e.control.parent.parent: {e.control.parent.parent}")
+            e.control.parent.parent.controls.clear()
+            e.control.parent.parent.controls.append(
+                flet.Row(
+                    [
+                        flet.TextButton(
+                            content=flet.Row(
+                                [
+                                    flet.Icon(name=flet.Icons.ARROW_DROP_UP, size=50),
+                                ],
+                            ),
+                            on_click=spl_token_arrow_drop_up_button_click,
+                            data=data,
+                        ),
+                    ],
+                    alignment=flet.MainAxisAlignment.CENTER,
+                ),
+            )
+            # tmp_show_spl_token_data = []
+            spl_token_data_text = ''
+            for k, v in data.items():
+                spl_token_data_text = spl_token_data_text + f'{k}: {v}\n'
+                # tmp_show_spl_token_data.append(
+                #     flet.Row(
+                #         scroll=flet.ScrollMode.AUTO,
+                #         controls=[
+                #             flet.Text(
+                #                 value='',
+                #                 selectable=True,
+                #                 spans=[
+                #                     flet.TextSpan(f'{k}: ', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
+                #                     flet.TextSpan(f'{v}', flet.TextStyle(size=16)),
+                #                 ]
+                #             ),
+                #         ]
+                #     )
+                # )
+            e.control.parent.parent.controls.extend(
+                [
+                    flet.Text(value=spl_token_data_text, selectable=True),
+                    # flet.Row([flet.Text(value=spl_token_data_text, selectable=True)]),
+                    # *tmp_show_spl_token_data,
+                    # flet.Row(
+                    #     [
+                    #         # flet.TextButton("Copy"),
+                    #         flet.ElevatedButton(
+                    #             text="Copy",
+                    #             icon=flet.Icons.COPY,
+                    #             on_click=spl_token_data_copy_clicked,
+                    #             data=data
+                    #         )
+                    #     ],
+                    #     alignment=flet.MainAxisAlignment.CENTER,
+                    # ),
+                ]
+            )
+        except Exception as er:
+            print(f'Error spl_token_arrow_drop_down_button_click: {er}')
+            page.open(
+                flet.AlertDialog(
+                    title=flet.Text("Error spl_token_arrow_drop_down_button_click!"),
+                )
+            )
+        finally:
+            page.update()
+
+    def spl_token_arrow_drop_up_button_click(e):
+        try:
+            data = e.control.data
+            e.control.parent.parent.controls.clear()
+            e.control.parent.parent.controls.append(
+                flet.Row(
+                    [
+                        flet.TextButton(
+                            content=flet.Row(
+                                [
+                                    flet.Icon(name=flet.Icons.ARROW_DROP_DOWN, size=50),
+                                ],
+                            ),
+                            on_click=spl_token_arrow_drop_down_button_click,
+                            data=data,
+                        ),
+                    ],
+                    alignment=flet.MainAxisAlignment.CENTER,
+                ),
+            )
+        except Exception as er:
+            print(f'Error spl_token_arrow_drop_up_button_click: {er}')
+            page.open(
+                flet.AlertDialog(
+                    title=flet.Text("Error spl_token_arrow_drop_up_button_click!"),
+                )
+            )
+        finally:
+            page.update()
+
+    # def spl_token_data_copy_clicked(e):
+    #     alert_text = "The data to copy does not exist."
+    #     data = e.control.data
+    #     if data:
+    #         # Основной метод для копирования в буфер
+    #         page.set_clipboard(data)
+
+    #         # # Показываем уведомление (SnackBar), что текст скопирован
+    #         # page.snack_bar = flet.SnackBar(
+    #         #     flet.Text(f"Скопировано: {e.control.data}"),
+    #         #     action="OK"
+    #         # )
+    #         # page.snack_bar.open = True
+
+    #         alert_text = f"Copied: {data}"
+    #     print(alert_text)
 
     def go_to_spl_token_page_button_click(e):
         print(f'****** go_to_spl_token_page_button_click >> e.control.data: {e.control.data}')
