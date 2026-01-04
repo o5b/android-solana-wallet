@@ -390,22 +390,21 @@ def get_sol_spl_balance(address: str, networks: list) -> list:
                             token_data['metadata_pda_address'] = metadata_pda_address
                             token_data['error'] = token_metaplex_metadata['error']
 
+                        if 'uri_2022' in token_data and token_data['uri_2022']:
+                            token_data['metadata_from_uri'] = get_spl_token_data_from_uri(uri=token_data['uri_2022'])
+                        elif 'uri_metaplex' in token_data and token_data['uri_metaplex']:
+                            token_data['metadata_from_uri'] = get_spl_token_data_from_uri(uri=token_data['uri_metaplex'])
+
+                        if 'metadata_from_uri' in token_data and token_data['metadata_from_uri']:
+                            if 'image' in token_data['metadata_from_uri'] and token_data['metadata_from_uri']['image']:
+                                token_data['logo'] = get_spl_token_image(token_data['metadata_from_uri']['image'])
+
                         network_result['spl'].append(token_data)
 
             else:
                 print(f"Ошибка при получении SPL токенов (Program ID: {program_id})")
         result.append(network_result)
     return result
-
-
-# @dataclass
-# class TransactionCost:
-#     total_sol: float
-#     total_lamports: int
-#     base_fee: int
-#     rent_fee: int
-#     priority_fee: int
-#     will_create_ata: bool
 
 
 def calculate_total_transfer_cost(
@@ -415,7 +414,7 @@ def calculate_total_transfer_cost(
     recipient_pubkey: PublicKey | None = None,
     program_id: PublicKey | None = None,
     cu_limit: int = 80000
-) -> dict: # TransactionCost:
+) -> dict:
     # чтобы точно определить, хватит ли пользователю SOL, ваша логика должна выглядеть так:
     # TotalCost = BaseFee + Rent + (ComputeUnitLimit * ComputeUnitPrice) / 1,000,000
     # Где:BaseFee: 5,000 лампорт.
@@ -467,16 +466,7 @@ def calculate_total_transfer_cost(
         will_create_ata=will_create_ata
     )
 
-    # return TransactionCost(
-    #     total_sol=total_sol,
-    #     total_lamports=total_lamports,
-    #     base_fee=base_fee,
-    #     rent_fee=rent_fee,
-    #     priority_fee=priority_fee_lamports,
-    #     will_create_ata=will_create_ata
-    # )
     return cost
-
 
 
 def get_priority_fees(mint_pubkey: PublicKey, network: str) -> int:
@@ -512,3 +502,35 @@ def get_priority_fees(mint_pubkey: PublicKey, network: str) -> int:
         # Берем максимум (для быстрой обработки)
         fees.sort()
         return int(fees[-1]) # Максимальное из полученных значений
+
+
+def get_spl_token_data_from_uri(uri: str) -> dict | None:
+    try:
+        url = uri
+        # headers = {"Content-Type": "application/json"}
+        response = requests.get(url)
+        if response.status_code == 200:
+            response_json = response.json()
+            # print(f'*** get_token_data_from_uri response_json: {response_json}')
+            return response_json
+    except Exception as er:
+        print(f'Error get_token_data_from_uri! URI: {uri}. Error: {er}')
+    return None
+
+
+def get_spl_token_image(url: str) -> str | None:
+    """
+    Downloads an image from a URL and returns its contents in bytes.
+    """
+    try:
+        response = requests.get(url, timeout=3)
+        response.raise_for_status()
+        print(f'*** get_spl_token_image response.headers: {response.headers}')
+        if 'image' not in response.headers.get('Content-Type', ''):
+            # "Предупреждение: URL не указывает на изображение."
+            print("Warning: URL does not point to an image.")
+            return None
+        return response.content
+    except requests.exceptions.RequestException as e:
+        print(f"Error get_spl_token_image: {e}")
+    return None

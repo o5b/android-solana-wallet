@@ -1,6 +1,7 @@
 from datetime import datetime
 import time
 import flet
+import base64
 
 from solana.create_wallet import create_solana_wallet
 from solana.balance import get_sol_spl_balance, get_sol_balance
@@ -278,6 +279,23 @@ def main(page: flet.Page):
                         token_symbol += f'{spl_token['symbol_metaplex']} (symbol_metaplex) '
                     if 'symbol_2022' in spl_token:
                         token_symbol += f'{spl_token['symbol_2022']} (symbol_2022)'
+                    spl_token_logo = flet.Image(
+                        width=100,
+                        height=100,
+                        fit=flet.ImageFit.CONTAIN,
+                        border_radius=flet.border_radius.all(10),
+                    )
+                    image_base64 = ''
+                    if 'logo' in spl_token and spl_token['logo']:
+                        # Конвертируем байты в base64-строку
+                        try:
+                            image_base64 = base64.b64encode(spl_token['logo']).decode("utf-8")
+                        except Exception as er:
+                            print(f'Error при конвертации байтов изображения в base64-строку. Msg: {er}')
+                    if image_base64:
+                        spl_token_logo.src_base64 = image_base64
+                    else:
+                        spl_token_logo.src = "spl-token-placeholder.png"
                     tmp_balance_spl.extend(
                         [
                             flet.Row(
@@ -297,6 +315,7 @@ def main(page: flet.Page):
                                         # disabled=False if (r['sol'] and spl_token['amount']) else True,
                                         disabled=False if (r['sol'] and spl_token['amount'] and r['sol'] > spl_token['transfer_cost']["total_sol"]) else True,
                                     ),
+                                    spl_token_logo,
                                     flet.Text(
                                         value='',
                                         spans=[
@@ -326,7 +345,7 @@ def main(page: flet.Page):
                                                     ],
                                                 ),
                                                 on_click=spl_token_arrow_drop_down_button_click,
-                                                data=spl_token,
+                                                data={k: v for k, v in spl_token.items() if k != 'logo'},
                                             ),
                                         ],
                                         alignment=flet.MainAxisAlignment.CENTER,
