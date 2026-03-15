@@ -1,7 +1,7 @@
 from datetime import datetime
-import time
+import asyncio
 import pprint
-import requests
+import httpx
 import json
 import base64
 import struct
@@ -10,9 +10,7 @@ from dataclasses import dataclass
 
 from .publickey import PublicKey
 
-
-def get_sol_balance(address, network):
-    # url = f"https://api.{network}.solana.com"
+async def get_sol_balance(address, network):
     url = network
     headers = {"Content-Type": "application/json"}
     payload = {
@@ -21,20 +19,18 @@ def get_sol_balance(address, network):
         "method": "getBalance",
         "params": [address]
     }
-    response = requests.post(url, headers=headers, json=payload)
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, headers=headers, json=payload)
+
     if response.status_code == 200:
-        # print(f"*** get_sol_balances >> Headers: {response.headers}")
         result = response.json().get("result", {}).get("value", 0)
         return result / 1_000_000_000  # Баланс в SOL
     else:
         error_message = response.text
-        # raise Exception(f"Error get_sol_balance: {error_message}")
         print(f"Error get_sol_balance: {error_message} \nHeaders: {response.headers}")
     return None
 
-
-def get_spl_balances(address, network, program_id):
-    # url = f"https://api.{network}.solana.com"
+async def get_spl_balances(address, network, program_id):
     url = network
     headers = {"Content-Type": "application/json"}
     payload = {
@@ -48,52 +44,36 @@ def get_spl_balances(address, network, program_id):
         ]
     }
     retry_after = 1
-    while retry_after >= 1:
-        time.sleep(retry_after)
-        response = requests.post(url, headers=headers, json=payload)
-        # print(f"*** get_spl_balances >> Headers: {response.headers}")
-        retry_after = int(response.headers.get('retry-after', '0'))
-        print(f'get_spl_balances >> response.headers >> retry_after={retry_after}')
-    if response.status_code == 200:
-        result = response.json().get("result", {}).get("value", [])
-        tokens = {}
-        for account in result:
-            token_info = account.get("account", {}).get("data", {}).get("parsed", {}).get("info", {})
-            mint = token_info.get("mint")
-            amount = int(token_info.get("tokenAmount", {}).get("amount", 0))
-            decimals = int(token_info.get("tokenAmount", {}).get("decimals", 0))
-            owner = token_info.get("owner", "Unknown")
-            tokens[mint] = {
-                "amount": amount / (10 ** decimals) if decimals else amount,
-                "owner": owner,
-                "decimals": decimals,
-            }
-        return tokens
-    else:
-        error_message = response.text
-        print(f"Error get_spl_balance: {error_message} \nHeaders: {response.headers}")
-        """
-        Error get_spl_balance:  {"jsonrpc":"2.0","error":{"code": 429,"message":"Too many requests for a specific RPC call"}, "id": 1 }
 
-        Headers: {'access-control-max-age': '86400', 'content-length': '107', 'content-type': 'application/json', 'cache-control': 'no-cache', 'access-control-allow-origin': '*', 'access-control-allow-methods': 'POST, GET, OPTIONS', 'retry-after': '10', 'x-rpc-node': 'sxb1', 'x-ratelimit-tier': 'free', 'x-ratelimit-method-limit': '2', 'x-ratelimit-method-remaining': '-4', 'x-ratelimit-rps-limit': '100', 'x-ratelimit-rps-remaining': '91', 'x-ratelimit-endpoint-limit': 'unlimited', 'x-ratelimit-endpoint-remaining': '-2010', 'x-ratelimit-conn-limit': '40', 'x-ratelimit-conn-remaining': '39', 'x-ratelimit-connrate-limit': '40', 'x-ratelimit-connrate-remaining': '39', 'x-ratelimit-pubsub-limit': '5', 'x-ratelimit-pubsub-remaining': '5', 'connection': 'close'}
-        """
-        # response.headers={'retry-after': '10'}
-        # When you get a 429 http status, the status usually comes with a response header Retry-After. This response header gives you the amount of time to delay until the next API call.
-        # If you follow the information given back in the RPC API response headers, you should be able to abide by the given rate limits.
-        """The answer is Solana imposes limits:
-            X-Ratelimit-Conn-Limit: The maximum number of concurrent connections allowed.
-            Example: 40 X-Ratelimit-Conn-Remaining: Remaining concurrent connections in the current window.
-            Example: 38 X-Ratelimit-Method-Limit: The limit on requests for a specific method.
-            Example: 10 X-Ratelimit-Method-Remaining: Remaining requests for the specific method.
-            Example: 8 X-Ratelimit-Rps-Limit: The limit on requests per second.
-            Example: 100 X-Ratelimit-Rps-Remaining: Remaining requests in the current second.
-            Example: 97 X-Ratelimit-Tier: Indicates the user's rate limit tier (e.g., free, premium).
-        """
-    return None
+    async with httpx.AsyncClient() as client:
+        while retry_after >= 1:
+            await asyncio.sleep(retry_after)
+            response = await client.post(url, headers=headers, json=payload)
+            retry_after = int(response.headers.get('retry-after', '0'))
+            if retry_after > 0:
+                print(f'get_spl_balances >> response.headers >> retry_after={retry_after}')
 
+        if response.status_code == 200:
+            result = response.json().get("result", {}).get("value", [])
+            tokens = {}
+            for account in result:
+                token_info = account.get("account", {}).get("data", {}).get("parsed", {}).get("info", {})
+                mint = token_info.get("mint")
+                amount = int(token_info.get("tokenAmount", {}).get("amount", 0))
+                decimals = int(token_info.get("tokenAmount", {}).get("decimals", 0))
+                owner = token_info.get("owner", "Unknown")
+                tokens[mint] = {
+                    "amount": amount / (10 ** decimals) if decimals else amount,
+                    "owner": owner,
+                    "decimals": decimals,
+                }
+            return tokens
+        else:
+            error_message = response.text
+            print(f"Error get_spl_balance: {error_message} \nHeaders: {response.headers}")
+        return None
 
-def get_account_info(address, network):
-    # url = f"https://api.{network}.solana.com"
+async def get_account_info(address, network):
     url = network
     headers = {"Content-Type": "application/json"}
     payload = {
@@ -102,21 +82,18 @@ def get_account_info(address, network):
         "method": "getAccountInfo",
         "params": [
             address,
-            {
-                "encoding": "base64"
-            }
+            {"encoding": "base64"}
         ]
     }
-    response = requests.post(url, headers=headers, json=payload)
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, headers=headers, json=payload)
+
     if response.status_code == 200:
-        # print(f"*** get_account_info >> Headers: {response.headers}")
-        # print(f'get_account_info response.json(): {response.json()}')
         return response.json().get("result", {}).get("value", [])
     else:
         error_message = response.text
         print(f"Error get_account_info: {error_message} \nHeaders: {response.headers}")
     return None
-
 
 def decode_metadata(data: list[str, str]) -> str | None:
     if len(data) == 2:
@@ -126,9 +103,7 @@ def decode_metadata(data: list[str, str]) -> str | None:
             return base58.b58decode(data[0])
     return None
 
-
 def get_metadata_pda(mint_address: str) -> str:
-    # Metaplex Token Metadata Program ID
     METAPLEX_METADATA_PROGRAM_ID = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
     mint_pubkey = PublicKey(mint_address)
     program_id_pubkey = PublicKey(METAPLEX_METADATA_PROGRAM_ID)
@@ -140,11 +115,8 @@ def get_metadata_pda(mint_address: str) -> str:
     metadata_pda, _ = PublicKey.find_program_address(seeds, program_id_pubkey)
     return str(metadata_pda)
 
-
 def parse_metadata_2022_program_id(data: bytes):
     metadata = {
-        # "mint_authority": "",
-        # "freeze_authority": "",
         "update_authority": "",
         "mint": "",
         "name": "",
@@ -152,42 +124,26 @@ def parse_metadata_2022_program_id(data: bytes):
         "uri": "",
         "error": ""
     }
-
     try:
         offset = 0
-
-        # Пропускаем первые 4 байта (версия или флаг)
-        #offset += 4
-
         if len(data) > 314:
-            # Пропускаем первые 238 байт
             offset += 238
-
-            # Декодируем update_authority (32 байта)
             update_authority = base58.b58encode(data[offset:offset + 32]).decode()
             offset += 32
-
-            # Декодируем mint (32 байта)
             mint = base58.b58encode(data[offset:offset + 32]).decode()
             offset += 32
 
-            # Декодируем длину имени (4 байта) и само имя
             name_length = struct.unpack_from("<I", data, offset)[0]
-            print(f'name_length: {name_length}')
             offset += 4
             name = data[offset:offset + name_length].decode()
             offset += name_length
 
-            # Декодируем длину символа (4 байта) и сам символ
             symbol_length = struct.unpack_from("<I", data, offset)[0]
-            print(f'symbol_length: {symbol_length}')
             offset += 4
             symbol = data[offset:offset + symbol_length].decode()
             offset += symbol_length
 
-            # Декодируем длину URI (4 байта) и сам URI
             uri_length = struct.unpack_from("<I", data, offset)[0]
-            print(f'uri_length: {uri_length}')
             offset += 4
             uri = data[offset:offset + uri_length].decode()
             offset += uri_length
@@ -197,36 +153,13 @@ def parse_metadata_2022_program_id(data: bytes):
             metadata["name"] = name
             metadata["symbol"] = symbol
             metadata["uri"] = uri
-
-        # else:
-        #     # Пропускаем первые 4 байта (версия или флаг)
-        #     offset += 4
-
-        #     # Декодируем mint_authority (32 байта)
-        #     mint_authority = base58.b58encode(data[offset:offset + 32]).decode()
-        #     offset += 32
-
-        #     # TODO: непонятные данные, ex.: b'\xb2\xde;\x8f\x06\xf7\xbb\x98\x06\x01'
-        #     offset += 10
-
-        #     # Пропускаем следующие 4 байта (версия или флаг)
-        #     offset += 4
-
-        #     freeze_authority = base58.b58encode(data[offset:offset + 32]).decode()
-        #     offset += 32
-
-        #     metadata["mint_authority"] = mint_authority
-        #     metadata["freeze_authority"] = freeze_authority
     except Exception as er:
         print(f"***** Error parse_metadata_2022_program_id: {er} ")
         metadata["error"] = er
     return metadata
 
-
 def parse_metadata_metaplex(data: bytes):
     metadata = {
-        # "mint_authority": "",
-        # "freeze_authority": "",
         "update_authority": "",
         "mint": "",
         "name": "",
@@ -234,43 +167,27 @@ def parse_metadata_metaplex(data: bytes):
         "uri": "",
         "error": ""
     }
-
     try:
         offset = 0
-
         if len(data) == 679:
-            # Пропускаем первый байт (версия или флаг)
             offset += 1
-
-            # Декодируем update_authority (32 байта)
             update_authority = base58.b58encode(data[offset:offset + 32]).decode()
             offset += 32
-
-            # Декодируем mint (32 байта)
             mint = base58.b58encode(data[offset:offset + 32]).decode()
             offset += 32
 
-            # Декодируем длину имени (4 байта) и само имя
             name_length = struct.unpack_from("<I", data, offset)[0]
-            print(f'name_length: {name_length}')
             offset += 4
-            # name = data[offset:offset + name_length].decode()
             name = data[offset:offset + name_length].replace(b'\x00', b'').decode()
             offset += name_length
 
-            # Декодируем длину символа (4 байта) и сам символ
             symbol_length = struct.unpack_from("<I", data, offset)[0]
-            print(f'symbol_length: {symbol_length}')
             offset += 4
-            # symbol = data[offset:offset + symbol_length].decode()
             symbol = data[offset:offset + symbol_length].replace(b'\x00', b'').decode()
             offset += symbol_length
 
-            # Декодируем длину URI (4 байта) и сам URI
             uri_length = struct.unpack_from("<I", data, offset)[0]
-            print(f'uri_length: {uri_length}')
             offset += 4
-            # uri = data[offset:offset + uri_length].decode()
             uri = data[offset:offset + uri_length].replace(b'\x00', b'').decode()
             offset += uri_length
 
@@ -279,28 +196,25 @@ def parse_metadata_metaplex(data: bytes):
             metadata["name"] = name
             metadata["symbol"] = symbol
             metadata["uri"] = uri
-
     except Exception as er:
         print(f"***** Error parse_metadata_metaplex: {er} ")
         metadata["error"] = er
     return metadata
 
-
-def get_sol_spl_balance(address: str, networks: list) -> list:
+async def get_sol_spl_balance(address: str, networks: list) -> list:
     result = []
-    TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"  # Standard SPL Token Program
-    TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"  # Token 2022 Program
+    TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+    TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 
     for network in networks:
         network_result = {
             'address': address,
-            # 'network': f"https://api.{network}.solana.com",
             'network': network,
             'sol': 0,
             'spl': []
         }
         print(f"\n******************* Сеть: {network} *******************")
-        sol_balance = get_sol_balance(address, network)
+        sol_balance = await get_sol_balance(address, network)
         if sol_balance is not None:
             print(f"Баланс SOL: {sol_balance:.9f}")
             network_result['sol'] = sol_balance
@@ -308,9 +222,8 @@ def get_sol_spl_balance(address: str, networks: list) -> list:
             print("Ошибка при получении баланса SOL")
 
         for program_id in [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]:
-            spl_balances = get_spl_balances(address, network, program_id)
+            spl_balances = await get_spl_balances(address, network, program_id)
             if spl_balances is not None:
-
                 if program_id == TOKEN_PROGRAM_ID:
                     print(f"\n********* SPL токены (TOKEN_PROGRAM_ID: {program_id}):")
                 elif program_id == TOKEN_2022_PROGRAM_ID:
@@ -324,40 +237,22 @@ def get_sol_spl_balance(address: str, networks: list) -> list:
                         token_metaplex_metadata = None
                         token_data = {}
                         if program_id == TOKEN_2022_PROGRAM_ID:
-                            response_account_info = get_account_info(mint, network)
+                            response_account_info = await get_account_info(mint, network)
                             print(f'response_account_info:{response_account_info}')
                             if response_account_info and ('data' in response_account_info):
                                 decode_metadata_bytes = decode_metadata(response_account_info['data'])
-                                print(f'decode_metadata_bytes 2022_program_id: {decode_metadata_bytes}')
                                 if decode_metadata_bytes:
                                     token_2022_program_id_metadata = parse_metadata_2022_program_id(decode_metadata_bytes)
                                     print(f'Token metadata (TOKEN_2022_PROGRAM_ID): {token_2022_program_id_metadata}')
-                                    if token_2022_program_id_metadata:
-                                        print(f"    Name: {token_2022_program_id_metadata['name']}")
-                                        print(f"    Symbol: {token_2022_program_id_metadata['symbol']}")
-                                        print(f"    JSON URL: {token_2022_program_id_metadata['uri']}")
-                                        print(f"    Update authority: {token_2022_program_id_metadata['update_authority']}")
-                                        print(f"    Mint: {token_2022_program_id_metadata['mint']}")
-                                        print(f'    Amount: {data['amount']}')
 
-                        # METAPLEX
                         metadata_pda_address = get_metadata_pda(mint_address=mint)
                         print(f'    Metadata PDA address: {metadata_pda_address}')
                         if metadata_pda_address:
-                            response_pda_account_info = get_account_info(metadata_pda_address, network)
-                            print(f'        response_pda_account_info: {response_pda_account_info}')
+                            response_pda_account_info = await get_account_info(metadata_pda_address, network)
                             if response_pda_account_info and ('data' in response_pda_account_info):
                                 decode_metadata_bytes = decode_metadata(response_pda_account_info['data'])
-                                print(f'decode_pda_metadata_bytes: {decode_metadata_bytes}')
                                 token_metaplex_metadata = parse_metadata_metaplex(decode_metadata_bytes)
                                 print(f'Token metadata (TOKEN_PROGRAM_ID - METAPLEX): {token_metaplex_metadata}')
-                                if token_metaplex_metadata:
-                                    print(f"    Name: {token_metaplex_metadata['name']}")
-                                    print(f"    Symbol: {token_metaplex_metadata['symbol']}")
-                                    print(f"    JSON URL: {token_metaplex_metadata['uri']}")
-                                    print(f"    Update authority: {token_metaplex_metadata['update_authority']}")
-                                    print(f"    Mint: {token_metaplex_metadata['mint']}")
-                                    print(f'    Amount: {data['amount']}')
 
                         token_data['program_id'] = program_id
                         token_data['mint'] = mint
@@ -365,13 +260,9 @@ def get_sol_spl_balance(address: str, networks: list) -> list:
                         token_data['owner'] = data['owner']
                         token_data['decimals'] = data['decimals']
 
-                        transfer_cost = calculate_total_transfer_cost(
-                            # sender_pubkey=sender_pubkey,
-                            # recipient_pubkey=PublicKey(address),
+                        transfer_cost = await calculate_total_transfer_cost(
                             mint_pubkey=PublicKey(mint),
-                            # program_id=program_id_pubkey,
                             network=network,
-                            # cu_limit: int = 80000
                         )
                         token_data['transfer_cost'] = transfer_cost
 
@@ -391,23 +282,21 @@ def get_sol_spl_balance(address: str, networks: list) -> list:
                             token_data['error'] = token_metaplex_metadata['error']
 
                         if 'uri_2022' in token_data and token_data['uri_2022']:
-                            token_data['metadata_from_uri'] = get_spl_token_data_from_uri(uri=token_data['uri_2022'])
+                            token_data['metadata_from_uri'] = await get_spl_token_data_from_uri(uri=token_data['uri_2022'])
                         elif 'uri_metaplex' in token_data and token_data['uri_metaplex']:
-                            token_data['metadata_from_uri'] = get_spl_token_data_from_uri(uri=token_data['uri_metaplex'])
+                            token_data['metadata_from_uri'] = await get_spl_token_data_from_uri(uri=token_data['uri_metaplex'])
 
                         if 'metadata_from_uri' in token_data and token_data['metadata_from_uri']:
                             if 'image' in token_data['metadata_from_uri'] and token_data['metadata_from_uri']['image']:
-                                token_data['logo'] = get_spl_token_image(token_data['metadata_from_uri']['image'])
+                                token_data['logo'] = await get_spl_token_image(token_data['metadata_from_uri']['image'])
 
                         network_result['spl'].append(token_data)
-
             else:
                 print(f"Ошибка при получении SPL токенов (Program ID: {program_id})")
         result.append(network_result)
     return result
 
-
-def calculate_total_transfer_cost(
+async def calculate_total_transfer_cost(
     mint_pubkey: PublicKey,
     network: str,
     sender_pubkey: PublicKey | None = None,
@@ -415,47 +304,16 @@ def calculate_total_transfer_cost(
     program_id: PublicKey | None = None,
     cu_limit: int = 80000
 ) -> dict:
-    # чтобы точно определить, хватит ли пользователю SOL, ваша логика должна выглядеть так:
-    # TotalCost = BaseFee + Rent + (ComputeUnitLimit * ComputeUnitPrice) / 1,000,000
-    # Где:BaseFee: 5,000 лампорт.
-    # Rent: 2,039,280 лампорт (если создаем ATA).
-    # Priority: Рассчитанная нами добавка.
-    # Compute Unit Limit: Всегда указывайте его явно. Если не указать, Solana зарезервирует 200,000 CU, что сделает транзакцию дороже для оценки сетью и может замедлить её включение в блок.
-    # Compute Unit Price: Если сеть "летит", можно ставить 1. Если сеть перегружена (например, во время популярного минта NFT), цена может взлетать до 500,000 и выше.
-
-    # 1. Базовая комиссия сети (за 1 подпись)
     base_fee = 5000
-
-    # 2. Проверка необходимости создания ATA (Rent)
-    # recipient_ata = get_associated_token_address(
-    #     owner=recipient_pubkey,
-    #     mint=mint_pubkey,
-    #     token_program_id=program_id
-    # )
-    # print(f'recipient_ata: {recipient_ata}')
-
-    # acc_info = get_account_info(f'{recipient_ata}', network)
-    # print(f'acc_info: {acc_info}')
-
-    # Стоимость аренды (Rent Exemption) для токенного аккаунта фиксирована
-    # Можно запросить через client.get_minimum_balance_for_rent_exemption(165)
-    # 165 байт — это фиксированный размер для SPL Token Account (аккаунта, который хранит информацию о ваших токенах: какой это токен, кто владелец и сколько их на балансе).
-    # 50 байт (или другие малые значения) обычно приводятся в учебных примерах
-    # rent_fee = 2039280 if acc_info is None else 0
-    # will_create_ata = acc_info is None
     rent_fee = 2039280
-    will_create_ata = True # по умолчанию считаем что нужно создать ATA
+    will_create_ata = True
 
-    # 3. Расчет Priority Fee
-    # Получаем среднюю цену за юнит и умножаем на лимит вычислений
-    unit_price = get_priority_fees(mint_pubkey, network)
+    unit_price = await get_priority_fees(mint_pubkey, network)
     print(f'unit_price: {unit_price}')
-    # Формула: (Limit * Price) / 1,000,000 (перевод из micro-lamports в lamports)
-    priority_fee_lamports = (cu_limit * unit_price) // 1_000_000
 
-    # 4. Итого
+    priority_fee_lamports = (cu_limit * unit_price) // 1_000_000
     total_lamports = base_fee + rent_fee + priority_fee_lamports
-    total_sol = total_lamports / 1_000_000_000 # В 1 SOL миллиард лампортов
+    total_sol = total_lamports / 1_000_000_000
 
     cost = dict(
         total_sol=total_sol,
@@ -465,13 +323,9 @@ def calculate_total_transfer_cost(
         priority_fee=priority_fee_lamports,
         will_create_ata=will_create_ata
     )
-
     return cost
 
-
-def get_priority_fees(mint_pubkey: PublicKey, network: str) -> int:
-    # Запрашиваем последние комиссии для конкретного токена/аккаунта
-    # Это дает наиболее точную картину "пробок" в конкретном секторе сети
+async def get_priority_fees(mint_pubkey: PublicKey, network: str) -> int:
     fees = []
     url = network
     headers = {"Content-Type": "application/json"}
@@ -479,58 +333,581 @@ def get_priority_fees(mint_pubkey: PublicKey, network: str) -> int:
         "jsonrpc": "2.0",
         "id": 1,
         "method": "getRecentPrioritizationFees",
-        "params": [
-            [f"{mint_pubkey}"]
-        ]
+        "params": [[f"{mint_pubkey}"]]
     }
-
-    # print(f'payload: {payload}')
-    response = requests.post(url, headers=headers, json=payload)
-    # print(f'response status getRecentPrioritizationFees: {response}')
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, headers=headers, json=payload)
 
     if response.status_code == 200:
         response_json = response.json()
-        # print('***********response_json getRecentPrioritizationFees:')
-        # pprint.pp(response_json)
-
         if "result" in response_json:
             fees = [fee["prioritizationFee"] for fee in response_json["result"]]
 
     if not fees:
-        return 1000 # Минимальное значение по умолчанию
+        return 1000
     else:
-        # Берем максимум (для быстрой обработки)
         fees.sort()
-        return int(fees[-1]) # Максимальное из полученных значений
+        return int(fees[-1])
 
-
-def get_spl_token_data_from_uri(uri: str) -> dict | None:
+async def get_spl_token_data_from_uri(uri: str) -> dict | None:
     try:
-        url = uri
-        # headers = {"Content-Type": "application/json"}
-        response = requests.get(url)
-        if response.status_code == 200:
-            response_json = response.json()
-            # print(f'*** get_token_data_from_uri response_json: {response_json}')
-            return response_json
+        async with httpx.AsyncClient() as client:
+            response = await client.get(uri)
+            if response.status_code == 200:
+                return response.json()
     except Exception as er:
         print(f'Error get_token_data_from_uri! URI: {uri}. Error: {er}')
     return None
 
-
-def get_spl_token_image(url: str) -> str | None:
-    """
-    Downloads an image from a URL and returns its contents in bytes.
-    """
+async def get_spl_token_image(url: str) -> str | None:
     try:
-        response = requests.get(url, timeout=3)
-        response.raise_for_status()
-        print(f'*** get_spl_token_image response.headers: {response.headers}')
-        if 'image' not in response.headers.get('Content-Type', ''):
-            # "Предупреждение: URL не указывает на изображение."
-            print("Warning: URL does not point to an image.")
-            return None
-        return response.content
-    except requests.exceptions.RequestException as e:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, timeout=3.0)
+            response.raise_for_status()
+
+            print(f'*** get_spl_token_image response.headers: {response.headers}')
+            if 'image' not in response.headers.get('Content-Type', ''):
+                print("Warning: URL does not point to an image.")
+                return None
+            return response.content
+    except httpx.RequestError as e:
         print(f"Error get_spl_token_image: {e}")
     return None
+
+##############################################
+# from datetime import datetime
+# import time
+# import pprint
+# import requests
+# import json
+# import base64
+# import struct
+# import base58
+# from dataclasses import dataclass
+
+# from .publickey import PublicKey
+
+
+# def get_sol_balance(address, network):
+#     # url = f"https://api.{network}.solana.com"
+#     url = network
+#     headers = {"Content-Type": "application/json"}
+#     payload = {
+#         "jsonrpc": "2.0",
+#         "id": 1,
+#         "method": "getBalance",
+#         "params": [address]
+#     }
+#     response = requests.post(url, headers=headers, json=payload)
+#     if response.status_code == 200:
+#         # print(f"*** get_sol_balances >> Headers: {response.headers}")
+#         result = response.json().get("result", {}).get("value", 0)
+#         return result / 1_000_000_000  # Баланс в SOL
+#     else:
+#         error_message = response.text
+#         # raise Exception(f"Error get_sol_balance: {error_message}")
+#         print(f"Error get_sol_balance: {error_message} \nHeaders: {response.headers}")
+#     return None
+
+
+# def get_spl_balances(address, network, program_id):
+#     # url = f"https://api.{network}.solana.com"
+#     url = network
+#     headers = {"Content-Type": "application/json"}
+#     payload = {
+#         "jsonrpc": "2.0",
+#         "id": 1,
+#         "method": "getTokenAccountsByOwner",
+#         "params": [
+#             address,
+#             {"programId": program_id},
+#             {"encoding": "jsonParsed"}
+#         ]
+#     }
+#     retry_after = 1
+#     while retry_after >= 1:
+#         time.sleep(retry_after)
+#         response = requests.post(url, headers=headers, json=payload)
+#         # print(f"*** get_spl_balances >> Headers: {response.headers}")
+#         retry_after = int(response.headers.get('retry-after', '0'))
+#         print(f'get_spl_balances >> response.headers >> retry_after={retry_after}')
+#     if response.status_code == 200:
+#         result = response.json().get("result", {}).get("value", [])
+#         tokens = {}
+#         for account in result:
+#             token_info = account.get("account", {}).get("data", {}).get("parsed", {}).get("info", {})
+#             mint = token_info.get("mint")
+#             amount = int(token_info.get("tokenAmount", {}).get("amount", 0))
+#             decimals = int(token_info.get("tokenAmount", {}).get("decimals", 0))
+#             owner = token_info.get("owner", "Unknown")
+#             tokens[mint] = {
+#                 "amount": amount / (10 ** decimals) if decimals else amount,
+#                 "owner": owner,
+#                 "decimals": decimals,
+#             }
+#         return tokens
+#     else:
+#         error_message = response.text
+#         print(f"Error get_spl_balance: {error_message} \nHeaders: {response.headers}")
+#         """
+#         Error get_spl_balance:  {"jsonrpc":"2.0","error":{"code": 429,"message":"Too many requests for a specific RPC call"}, "id": 1 }
+
+#         Headers: {'access-control-max-age': '86400', 'content-length': '107', 'content-type': 'application/json', 'cache-control': 'no-cache', 'access-control-allow-origin': '*', 'access-control-allow-methods': 'POST, GET, OPTIONS', 'retry-after': '10', 'x-rpc-node': 'sxb1', 'x-ratelimit-tier': 'free', 'x-ratelimit-method-limit': '2', 'x-ratelimit-method-remaining': '-4', 'x-ratelimit-rps-limit': '100', 'x-ratelimit-rps-remaining': '91', 'x-ratelimit-endpoint-limit': 'unlimited', 'x-ratelimit-endpoint-remaining': '-2010', 'x-ratelimit-conn-limit': '40', 'x-ratelimit-conn-remaining': '39', 'x-ratelimit-connrate-limit': '40', 'x-ratelimit-connrate-remaining': '39', 'x-ratelimit-pubsub-limit': '5', 'x-ratelimit-pubsub-remaining': '5', 'connection': 'close'}
+#         """
+#         # response.headers={'retry-after': '10'}
+#         # When you get a 429 http status, the status usually comes with a response header Retry-After. This response header gives you the amount of time to delay until the next API call.
+#         # If you follow the information given back in the RPC API response headers, you should be able to abide by the given rate limits.
+#         """The answer is Solana imposes limits:
+#             X-Ratelimit-Conn-Limit: The maximum number of concurrent connections allowed.
+#             Example: 40 X-Ratelimit-Conn-Remaining: Remaining concurrent connections in the current window.
+#             Example: 38 X-Ratelimit-Method-Limit: The limit on requests for a specific method.
+#             Example: 10 X-Ratelimit-Method-Remaining: Remaining requests for the specific method.
+#             Example: 8 X-Ratelimit-Rps-Limit: The limit on requests per second.
+#             Example: 100 X-Ratelimit-Rps-Remaining: Remaining requests in the current second.
+#             Example: 97 X-Ratelimit-Tier: Indicates the user's rate limit tier (e.g., free, premium).
+#         """
+#     return None
+
+
+# def get_account_info(address, network):
+#     # url = f"https://api.{network}.solana.com"
+#     url = network
+#     headers = {"Content-Type": "application/json"}
+#     payload = {
+#         "jsonrpc": "2.0",
+#         "id": 1,
+#         "method": "getAccountInfo",
+#         "params": [
+#             address,
+#             {
+#                 "encoding": "base64"
+#             }
+#         ]
+#     }
+#     response = requests.post(url, headers=headers, json=payload)
+#     if response.status_code == 200:
+#         # print(f"*** get_account_info >> Headers: {response.headers}")
+#         # print(f'get_account_info response.json(): {response.json()}')
+#         return response.json().get("result", {}).get("value", [])
+#     else:
+#         error_message = response.text
+#         print(f"Error get_account_info: {error_message} \nHeaders: {response.headers}")
+#     return None
+
+
+# def decode_metadata(data: list[str, str]) -> str | None:
+#     if len(data) == 2:
+#         if data[1] == 'base64':
+#             return base64.b64decode(data[0])
+#         elif data[1] == 'base58':
+#             return base58.b58decode(data[0])
+#     return None
+
+
+# def get_metadata_pda(mint_address: str) -> str:
+#     # Metaplex Token Metadata Program ID
+#     METAPLEX_METADATA_PROGRAM_ID = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+#     mint_pubkey = PublicKey(mint_address)
+#     program_id_pubkey = PublicKey(METAPLEX_METADATA_PROGRAM_ID)
+#     seeds = [
+#         b"metadata",
+#         bytes(program_id_pubkey),
+#         bytes(mint_pubkey)
+#     ]
+#     metadata_pda, _ = PublicKey.find_program_address(seeds, program_id_pubkey)
+#     return str(metadata_pda)
+
+
+# def parse_metadata_2022_program_id(data: bytes):
+#     metadata = {
+#         # "mint_authority": "",
+#         # "freeze_authority": "",
+#         "update_authority": "",
+#         "mint": "",
+#         "name": "",
+#         "symbol": "",
+#         "uri": "",
+#         "error": ""
+#     }
+
+#     try:
+#         offset = 0
+
+#         # Пропускаем первые 4 байта (версия или флаг)
+#         #offset += 4
+
+#         if len(data) > 314:
+#             # Пропускаем первые 238 байт
+#             offset += 238
+
+#             # Декодируем update_authority (32 байта)
+#             update_authority = base58.b58encode(data[offset:offset + 32]).decode()
+#             offset += 32
+
+#             # Декодируем mint (32 байта)
+#             mint = base58.b58encode(data[offset:offset + 32]).decode()
+#             offset += 32
+
+#             # Декодируем длину имени (4 байта) и само имя
+#             name_length = struct.unpack_from("<I", data, offset)[0]
+#             print(f'name_length: {name_length}')
+#             offset += 4
+#             name = data[offset:offset + name_length].decode()
+#             offset += name_length
+
+#             # Декодируем длину символа (4 байта) и сам символ
+#             symbol_length = struct.unpack_from("<I", data, offset)[0]
+#             print(f'symbol_length: {symbol_length}')
+#             offset += 4
+#             symbol = data[offset:offset + symbol_length].decode()
+#             offset += symbol_length
+
+#             # Декодируем длину URI (4 байта) и сам URI
+#             uri_length = struct.unpack_from("<I", data, offset)[0]
+#             print(f'uri_length: {uri_length}')
+#             offset += 4
+#             uri = data[offset:offset + uri_length].decode()
+#             offset += uri_length
+
+#             metadata["update_authority"] = update_authority
+#             metadata["mint"] = mint
+#             metadata["name"] = name
+#             metadata["symbol"] = symbol
+#             metadata["uri"] = uri
+
+#         # else:
+#         #     # Пропускаем первые 4 байта (версия или флаг)
+#         #     offset += 4
+
+#         #     # Декодируем mint_authority (32 байта)
+#         #     mint_authority = base58.b58encode(data[offset:offset + 32]).decode()
+#         #     offset += 32
+
+#         #     # TODO: непонятные данные, ex.: b'\xb2\xde;\x8f\x06\xf7\xbb\x98\x06\x01'
+#         #     offset += 10
+
+#         #     # Пропускаем следующие 4 байта (версия или флаг)
+#         #     offset += 4
+
+#         #     freeze_authority = base58.b58encode(data[offset:offset + 32]).decode()
+#         #     offset += 32
+
+#         #     metadata["mint_authority"] = mint_authority
+#         #     metadata["freeze_authority"] = freeze_authority
+#     except Exception as er:
+#         print(f"***** Error parse_metadata_2022_program_id: {er} ")
+#         metadata["error"] = er
+#     return metadata
+
+
+# def parse_metadata_metaplex(data: bytes):
+#     metadata = {
+#         # "mint_authority": "",
+#         # "freeze_authority": "",
+#         "update_authority": "",
+#         "mint": "",
+#         "name": "",
+#         "symbol": "",
+#         "uri": "",
+#         "error": ""
+#     }
+
+#     try:
+#         offset = 0
+
+#         if len(data) == 679:
+#             # Пропускаем первый байт (версия или флаг)
+#             offset += 1
+
+#             # Декодируем update_authority (32 байта)
+#             update_authority = base58.b58encode(data[offset:offset + 32]).decode()
+#             offset += 32
+
+#             # Декодируем mint (32 байта)
+#             mint = base58.b58encode(data[offset:offset + 32]).decode()
+#             offset += 32
+
+#             # Декодируем длину имени (4 байта) и само имя
+#             name_length = struct.unpack_from("<I", data, offset)[0]
+#             print(f'name_length: {name_length}')
+#             offset += 4
+#             # name = data[offset:offset + name_length].decode()
+#             name = data[offset:offset + name_length].replace(b'\x00', b'').decode()
+#             offset += name_length
+
+#             # Декодируем длину символа (4 байта) и сам символ
+#             symbol_length = struct.unpack_from("<I", data, offset)[0]
+#             print(f'symbol_length: {symbol_length}')
+#             offset += 4
+#             # symbol = data[offset:offset + symbol_length].decode()
+#             symbol = data[offset:offset + symbol_length].replace(b'\x00', b'').decode()
+#             offset += symbol_length
+
+#             # Декодируем длину URI (4 байта) и сам URI
+#             uri_length = struct.unpack_from("<I", data, offset)[0]
+#             print(f'uri_length: {uri_length}')
+#             offset += 4
+#             # uri = data[offset:offset + uri_length].decode()
+#             uri = data[offset:offset + uri_length].replace(b'\x00', b'').decode()
+#             offset += uri_length
+
+#             metadata["update_authority"] = update_authority
+#             metadata["mint"] = mint
+#             metadata["name"] = name
+#             metadata["symbol"] = symbol
+#             metadata["uri"] = uri
+
+#     except Exception as er:
+#         print(f"***** Error parse_metadata_metaplex: {er} ")
+#         metadata["error"] = er
+#     return metadata
+
+
+# def get_sol_spl_balance(address: str, networks: list) -> list:
+#     result = []
+#     TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"  # Standard SPL Token Program
+#     TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"  # Token 2022 Program
+
+#     for network in networks:
+#         network_result = {
+#             'address': address,
+#             # 'network': f"https://api.{network}.solana.com",
+#             'network': network,
+#             'sol': 0,
+#             'spl': []
+#         }
+#         print(f"\n******************* Сеть: {network} *******************")
+#         sol_balance = get_sol_balance(address, network)
+#         if sol_balance is not None:
+#             print(f"Баланс SOL: {sol_balance:.9f}")
+#             network_result['sol'] = sol_balance
+#         else:
+#             print("Ошибка при получении баланса SOL")
+
+#         for program_id in [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]:
+#             spl_balances = get_spl_balances(address, network, program_id)
+#             if spl_balances is not None:
+
+#                 if program_id == TOKEN_PROGRAM_ID:
+#                     print(f"\n********* SPL токены (TOKEN_PROGRAM_ID: {program_id}):")
+#                 elif program_id == TOKEN_2022_PROGRAM_ID:
+#                     print(f"\n********* SPL токены (TOKEN_2022_PROGRAM_ID: {program_id}):")
+#                 print(f'***** spl_balances: {spl_balances}')
+
+#                 for mint, data in spl_balances.items():
+#                     print(f"\n    ({mint}): {data['amount']} (Owner: {data['owner']})")
+#                     if mint:
+#                         token_2022_program_id_metadata = None
+#                         token_metaplex_metadata = None
+#                         token_data = {}
+#                         if program_id == TOKEN_2022_PROGRAM_ID:
+#                             response_account_info = get_account_info(mint, network)
+#                             print(f'response_account_info:{response_account_info}')
+#                             if response_account_info and ('data' in response_account_info):
+#                                 decode_metadata_bytes = decode_metadata(response_account_info['data'])
+#                                 print(f'decode_metadata_bytes 2022_program_id: {decode_metadata_bytes}')
+#                                 if decode_metadata_bytes:
+#                                     token_2022_program_id_metadata = parse_metadata_2022_program_id(decode_metadata_bytes)
+#                                     print(f'Token metadata (TOKEN_2022_PROGRAM_ID): {token_2022_program_id_metadata}')
+#                                     if token_2022_program_id_metadata:
+#                                         print(f"    Name: {token_2022_program_id_metadata['name']}")
+#                                         print(f"    Symbol: {token_2022_program_id_metadata['symbol']}")
+#                                         print(f"    JSON URL: {token_2022_program_id_metadata['uri']}")
+#                                         print(f"    Update authority: {token_2022_program_id_metadata['update_authority']}")
+#                                         print(f"    Mint: {token_2022_program_id_metadata['mint']}")
+#                                         print(f'    Amount: {data['amount']}')
+
+#                         # METAPLEX
+#                         metadata_pda_address = get_metadata_pda(mint_address=mint)
+#                         print(f'    Metadata PDA address: {metadata_pda_address}')
+#                         if metadata_pda_address:
+#                             response_pda_account_info = get_account_info(metadata_pda_address, network)
+#                             print(f'        response_pda_account_info: {response_pda_account_info}')
+#                             if response_pda_account_info and ('data' in response_pda_account_info):
+#                                 decode_metadata_bytes = decode_metadata(response_pda_account_info['data'])
+#                                 print(f'decode_pda_metadata_bytes: {decode_metadata_bytes}')
+#                                 token_metaplex_metadata = parse_metadata_metaplex(decode_metadata_bytes)
+#                                 print(f'Token metadata (TOKEN_PROGRAM_ID - METAPLEX): {token_metaplex_metadata}')
+#                                 if token_metaplex_metadata:
+#                                     print(f"    Name: {token_metaplex_metadata['name']}")
+#                                     print(f"    Symbol: {token_metaplex_metadata['symbol']}")
+#                                     print(f"    JSON URL: {token_metaplex_metadata['uri']}")
+#                                     print(f"    Update authority: {token_metaplex_metadata['update_authority']}")
+#                                     print(f"    Mint: {token_metaplex_metadata['mint']}")
+#                                     print(f'    Amount: {data['amount']}')
+
+#                         token_data['program_id'] = program_id
+#                         token_data['mint'] = mint
+#                         token_data['amount'] = data['amount']
+#                         token_data['owner'] = data['owner']
+#                         token_data['decimals'] = data['decimals']
+
+#                         transfer_cost = calculate_total_transfer_cost(
+#                             # sender_pubkey=sender_pubkey,
+#                             # recipient_pubkey=PublicKey(address),
+#                             mint_pubkey=PublicKey(mint),
+#                             # program_id=program_id_pubkey,
+#                             network=network,
+#                             # cu_limit: int = 80000
+#                         )
+#                         token_data['transfer_cost'] = transfer_cost
+
+#                         if token_2022_program_id_metadata:
+#                             token_data['name_2022'] = token_2022_program_id_metadata['name']
+#                             token_data['symbol_2022'] = token_2022_program_id_metadata['symbol']
+#                             token_data['uri_2022'] = token_2022_program_id_metadata['uri']
+#                             token_data['update_authority_2022'] = token_2022_program_id_metadata['update_authority']
+#                             token_data['error'] = token_2022_program_id_metadata['error']
+
+#                         if token_metaplex_metadata:
+#                             token_data['name_metaplex'] = token_metaplex_metadata['name']
+#                             token_data['symbol_metaplex'] = token_metaplex_metadata['symbol']
+#                             token_data['uri_metaplex'] = token_metaplex_metadata['uri']
+#                             token_data['update_authority_metaplex'] = token_metaplex_metadata['update_authority']
+#                             token_data['metadata_pda_address'] = metadata_pda_address
+#                             token_data['error'] = token_metaplex_metadata['error']
+
+#                         if 'uri_2022' in token_data and token_data['uri_2022']:
+#                             token_data['metadata_from_uri'] = get_spl_token_data_from_uri(uri=token_data['uri_2022'])
+#                         elif 'uri_metaplex' in token_data and token_data['uri_metaplex']:
+#                             token_data['metadata_from_uri'] = get_spl_token_data_from_uri(uri=token_data['uri_metaplex'])
+
+#                         if 'metadata_from_uri' in token_data and token_data['metadata_from_uri']:
+#                             if 'image' in token_data['metadata_from_uri'] and token_data['metadata_from_uri']['image']:
+#                                 token_data['logo'] = get_spl_token_image(token_data['metadata_from_uri']['image'])
+
+#                         network_result['spl'].append(token_data)
+
+#             else:
+#                 print(f"Ошибка при получении SPL токенов (Program ID: {program_id})")
+#         result.append(network_result)
+#     return result
+
+
+# def calculate_total_transfer_cost(
+#     mint_pubkey: PublicKey,
+#     network: str,
+#     sender_pubkey: PublicKey | None = None,
+#     recipient_pubkey: PublicKey | None = None,
+#     program_id: PublicKey | None = None,
+#     cu_limit: int = 80000
+# ) -> dict:
+#     # чтобы точно определить, хватит ли пользователю SOL, ваша логика должна выглядеть так:
+#     # TotalCost = BaseFee + Rent + (ComputeUnitLimit * ComputeUnitPrice) / 1,000,000
+#     # Где:BaseFee: 5,000 лампорт.
+#     # Rent: 2,039,280 лампорт (если создаем ATA).
+#     # Priority: Рассчитанная нами добавка.
+#     # Compute Unit Limit: Всегда указывайте его явно. Если не указать, Solana зарезервирует 200,000 CU, что сделает транзакцию дороже для оценки сетью и может замедлить её включение в блок.
+#     # Compute Unit Price: Если сеть "летит", можно ставить 1. Если сеть перегружена (например, во время популярного минта NFT), цена может взлетать до 500,000 и выше.
+
+#     # 1. Базовая комиссия сети (за 1 подпись)
+#     base_fee = 5000
+
+#     # 2. Проверка необходимости создания ATA (Rent)
+#     # recipient_ata = get_associated_token_address(
+#     #     owner=recipient_pubkey,
+#     #     mint=mint_pubkey,
+#     #     token_program_id=program_id
+#     # )
+#     # print(f'recipient_ata: {recipient_ata}')
+
+#     # acc_info = get_account_info(f'{recipient_ata}', network)
+#     # print(f'acc_info: {acc_info}')
+
+#     # Стоимость аренды (Rent Exemption) для токенного аккаунта фиксирована
+#     # Можно запросить через client.get_minimum_balance_for_rent_exemption(165)
+#     # 165 байт — это фиксированный размер для SPL Token Account (аккаунта, который хранит информацию о ваших токенах: какой это токен, кто владелец и сколько их на балансе).
+#     # 50 байт (или другие малые значения) обычно приводятся в учебных примерах
+#     # rent_fee = 2039280 if acc_info is None else 0
+#     # will_create_ata = acc_info is None
+#     rent_fee = 2039280
+#     will_create_ata = True # по умолчанию считаем что нужно создать ATA
+
+#     # 3. Расчет Priority Fee
+#     # Получаем среднюю цену за юнит и умножаем на лимит вычислений
+#     unit_price = get_priority_fees(mint_pubkey, network)
+#     print(f'unit_price: {unit_price}')
+#     # Формула: (Limit * Price) / 1,000,000 (перевод из micro-lamports в lamports)
+#     priority_fee_lamports = (cu_limit * unit_price) // 1_000_000
+
+#     # 4. Итого
+#     total_lamports = base_fee + rent_fee + priority_fee_lamports
+#     total_sol = total_lamports / 1_000_000_000 # В 1 SOL миллиард лампортов
+
+#     cost = dict(
+#         total_sol=total_sol,
+#         total_lamports=total_lamports,
+#         base_fee=base_fee,
+#         rent_fee=rent_fee,
+#         priority_fee=priority_fee_lamports,
+#         will_create_ata=will_create_ata
+#     )
+
+#     return cost
+
+
+# def get_priority_fees(mint_pubkey: PublicKey, network: str) -> int:
+#     # Запрашиваем последние комиссии для конкретного токена/аккаунта
+#     # Это дает наиболее точную картину "пробок" в конкретном секторе сети
+#     fees = []
+#     url = network
+#     headers = {"Content-Type": "application/json"}
+#     payload =    {
+#         "jsonrpc": "2.0",
+#         "id": 1,
+#         "method": "getRecentPrioritizationFees",
+#         "params": [
+#             [f"{mint_pubkey}"]
+#         ]
+#     }
+
+#     # print(f'payload: {payload}')
+#     response = requests.post(url, headers=headers, json=payload)
+#     # print(f'response status getRecentPrioritizationFees: {response}')
+
+#     if response.status_code == 200:
+#         response_json = response.json()
+#         # print('***********response_json getRecentPrioritizationFees:')
+#         # pprint.pp(response_json)
+
+#         if "result" in response_json:
+#             fees = [fee["prioritizationFee"] for fee in response_json["result"]]
+
+#     if not fees:
+#         return 1000 # Минимальное значение по умолчанию
+#     else:
+#         # Берем максимум (для быстрой обработки)
+#         fees.sort()
+#         return int(fees[-1]) # Максимальное из полученных значений
+
+
+# def get_spl_token_data_from_uri(uri: str) -> dict | None:
+#     try:
+#         url = uri
+#         # headers = {"Content-Type": "application/json"}
+#         response = requests.get(url)
+#         if response.status_code == 200:
+#             response_json = response.json()
+#             # print(f'*** get_token_data_from_uri response_json: {response_json}')
+#             return response_json
+#     except Exception as er:
+#         print(f'Error get_token_data_from_uri! URI: {uri}. Error: {er}')
+#     return None
+
+
+# def get_spl_token_image(url: str) -> str | None:
+#     """
+#     Downloads an image from a URL and returns its contents in bytes.
+#     """
+#     try:
+#         response = requests.get(url, timeout=3)
+#         response.raise_for_status()
+#         print(f'*** get_spl_token_image response.headers: {response.headers}')
+#         if 'image' not in response.headers.get('Content-Type', ''):
+#             # "Предупреждение: URL не указывает на изображение."
+#             print("Warning: URL does not point to an image.")
+#             return None
+#         return response.content
+#     except requests.exceptions.RequestException as e:
+#         print(f"Error get_spl_token_image: {e}")
+#     return None

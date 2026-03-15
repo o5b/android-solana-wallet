@@ -7,15 +7,16 @@ import json
 from solana.create_wallet import create_solana_wallet
 from solana.balance import get_sol_spl_balance, get_sol_balance
 from solana.transfer_sol import transfer_sol_token, get_min_sol_balance
-from solana.transfer_spl import transfer_spl_token
-from solana.spl_token import request_airdrop
+# from solana.transfer_spl import transfer_spl_token
+from solana.spl_token import request_airdrop, transfer_spl_token
 from solana.validators import is_valid_amount, is_valid_wallet_address, is_valid_private_key, is_valid_wallet_seed_phrase
+from solana.transaction_history import get_transaction_history
 
 # LAMPORT_TO_SOL_RATIO = 10 ** 9
 
 async def main(page: flet.Page):
     page.scroll = flet.ScrollMode.AUTO
-    page.title = "Solana Wallet Generator"
+    page.title = "Solana Wallet"
     page.vertical_alignment = flet.MainAxisAlignment.CENTER
     page.horizontal_alignment = flet.CrossAxisAlignment.CENTER
     page.bgcolor = 'white'
@@ -85,6 +86,8 @@ async def main(page: flet.Page):
                     val = json.loads(val)
                 except json.JSONDecodeError:
                     pass
+            if isinstance(val, dict):
+                val['storage_key'] = key
             data_list.append(val)
         print(f'data_list: {data_list}')
         return data_list
@@ -154,10 +157,70 @@ async def main(page: flet.Page):
     el_address_page = flet.Column()
     el_token_balance_data = flet.Column()
 
+    async def delete_wallet_click(e):
+        wallet = e.control.data
+        if 'storage_key' in wallet:
+            await page.shared_preferences.remove(wallet['storage_key'])
+            page.show_dialog(flet.AlertDialog(title=flet.Text("Wallet deleted successfully!")))
+            await page.push_route("/")
+
+    async def wallet_info_click(e):
+        wallet = e.control.data
+
+        def close_dlg(e):
+            dlg_info.open = False
+            page.update()
+
+        async def save_info(e):
+            if 'storage_key' in wallet:
+                wallet['name'] = tf_name.value
+                wallet['description'] = tf_desc.value
+                await page.shared_preferences.set(wallet['storage_key'], json.dumps(wallet))
+                dlg_info.open = False
+                page.update()
+                await page.push_route("/")
+
+        async def copy_data(e):
+            copy_val = {k: v for k, v in wallet.items() if k != 'storage_key'}
+            await page.clipboard.set(json.dumps(copy_val, indent=2))
+
+        tf_name = flet.TextField(label="Name", value=wallet.get('name', ''))
+        tf_desc = flet.TextField(label="Description", value=wallet.get('description', ''), multiline=True)
+
+        info_text = f"Address: {wallet.get('address_base58')}\n" \
+                    f"Created: {wallet.get('created')}\n" \
+                    f"Private Key: {wallet.get('private_key_hex')}\n" \
+                    f"Public Key: {wallet.get('public_key_hex')}\n" \
+                    f"Words: {wallet.get('words')}\n" \
+                    f"Secret Key (base58): {wallet.get('secret_key_base58')}"
+
+        dlg_info = flet.AlertDialog(
+            title=flet.Text("Wallet Info"),
+            content=flet.Column([
+                tf_name,
+                tf_desc,
+                flet.Text(info_text, selectable=True, size=12),
+                flet.ElevatedButton("Copy All Data", on_click=copy_data, icon=flet.Icons.COPY)
+            ], scroll=flet.ScrollMode.AUTO, height=400),
+            actions=[
+                flet.TextButton("Save", on_click=save_info),
+                flet.TextButton("Cancel", on_click=close_dlg)
+            ],
+            actions_alignment=flet.MainAxisAlignment.END
+        )
+        page.show_dialog(dlg_info)
+
     async def go_to_address_page(e):
         print(f'****** go_to_address_page e.control.data: {e.control.data}')
         wallet = e.control.data
         el_address_page.controls = [
+            flet.Row(
+                [
+                    flet.IconButton(icon=flet.Icons.INFO, tooltip="Wallet Info", on_click=wallet_info_click, data=wallet),
+                    flet.IconButton(icon=flet.Icons.DELETE, tooltip="Delete Wallet", on_click=delete_wallet_click, data=wallet, icon_color="red"),
+                ],
+                alignment=flet.MainAxisAlignment.END
+            ),
             flet.Row(
                 [
                     flet.Text(
@@ -237,6 +300,11 @@ async def main(page: flet.Page):
             flet.Row(
                 [
                     flet.ElevatedButton(
+                        content=flet.Text("Show History"),
+                        on_click=get_history_button_click,
+                        data=wallet,
+                    ),
+                    flet.ElevatedButton(
                         content=flet.Text("Show Balance"),
                         on_click=get_balance_button_click,
                         # data=wallet['address_base58'],
@@ -248,6 +316,159 @@ async def main(page: flet.Page):
             el_token_balance_data,
         ]
         await page.push_route("address-page")
+
+    async def get_history_button_click(e):
+        try:
+            wallet = e.control.data
+            print(f'****** address >> get_history_button_click: {wallet}')
+            el_token_balance_data.controls.clear()
+            page.update()
+
+            networks = []
+            # Собираем выбранные сети аналогично балансу
+            if e.control.parent.parent.controls[-3].controls[0].controls[0].value:
+                networks.append(("mainnet-beta", "https://api.mainnet-beta.solana.com"))
+            if e.control.parent.parent.controls[-3].controls[0].controls[1].value:
+                networks.append(("testnet", "https://api.testnet.solana.com"))
+            if e.control.parent.parent.controls[-3].controls[0].controls[2].value:
+                networks.append(("devnet", "https://api.devnet.solana.com"))
+
+            e.control.disabled = True   # блокируем кнопку
+            el_token_balance_data.controls.append(
+                flet.Row([flet.ProgressRing(), flet.Text("LOADING HISTORY...")], alignment=flet.MainAxisAlignment.CENTER)
+            )
+            page.update()
+
+            tmp_history_result = [flet.Divider(thickness=3)]
+
+            for net_name, net_url in networks:
+                tmp_history_result.append(
+                    flet.Row([flet.Text(f'Network: {net_name}', size=16, weight=flet.FontWeight.BOLD)])
+                )
+
+                # Запрашиваем историю
+                history_data = await get_transaction_history(wallet['address_base58'], net_url)
+
+                if "error" in history_data:
+                    tmp_history_result.append(flet.Text(f"Error: {history_data['error']}", color="red"))
+                elif "result" in history_data and history_data["result"]:
+                    for tx in history_data["result"]:
+                        time_str = datetime.fromtimestamp(tx['block_time']).strftime('%Y-%m-%d %H:%M:%S') if tx['block_time'] else "Unknown"
+
+                        sol_change = tx.get('sol_change', 0)
+                        if sol_change > 0:
+                            change_color, change_sign = "green", "+"
+                        elif sol_change < 0:
+                            change_color, change_sign = "red", ""
+                        else:
+                            change_color = "black" if page.theme_mode == flet.ThemeMode.LIGHT else "white"
+                            change_sign = ""
+
+                        balance_spans = [
+                            flet.TextSpan(f"{change_sign}{sol_change:.9f} SOL", flet.TextStyle(size=14, color=change_color, weight=flet.FontWeight.BOLD))
+                        ]
+
+                        if "spl_changes" in tx and tx["spl_changes"]:
+                            for spl in tx["spl_changes"]:
+                                change = spl["change"]
+                                spl_color = "green" if change > 0 else "red"
+                                spl_sign = "+" if change > 0 else ""
+
+                                # Если символ найден, используем его, иначе режем mint адрес
+                                display_name = spl.get("symbol") or f"{spl['mint'][:4]}...{spl['mint'][-4:]}"
+
+                                balance_spans.append(
+                                    flet.TextSpan(f"\n{spl_sign}{change} ", flet.TextStyle(size=14, color=spl_color, weight=flet.FontWeight.BOLD))
+                                )
+                                balance_spans.append(
+                                    flet.TextSpan(f"{display_name}", flet.TextStyle(size=12, color="grey"))
+                                )
+
+                        # Изолированная функция для создания интерактивной карточки
+                        def create_tx_card(tx_data, t_str, b_spans):
+
+                            # Формируем логи в виде прокручиваемого списка
+                            logs_controls = [flet.Text("Logs:", size=12, weight=flet.FontWeight.BOLD)]
+                            if tx_data.get('logs'):
+                                for log in tx_data['logs']:
+                                    # Подсвечиваем ошибки красным для удобства
+                                    log_color = "red" if "failed" in log.lower() or "error" in log.lower() else "grey"
+                                    logs_controls.append(flet.Text(f"• {log}", size=10, color=log_color, selectable=True))
+                            else:
+                                logs_controls.append(flet.Text("No logs available", size=10, color="grey"))
+
+                            # Оборачиваем логи в Column с фиксированной высотой и скроллом
+                            logs_column = flet.Container(
+                                content=flet.Column(logs_controls, spacing=2, scroll=flet.ScrollMode.AUTO),
+                                height=100,
+                                padding=5,
+                                border=flet.border.all(1, "black12"),
+                                border_radius=5
+                            )
+
+                            # Скрытая колонка с деталями
+                            details_col = flet.Column(
+                                visible=False,
+                                controls=[
+                                    flet.Divider(thickness=1),
+                                    flet.Text(f"Signature: {tx_data['signature']}", selectable=True, size=12, italic=True),
+                                    flet.Text(
+                                        f"Status: {'Success' if tx_data['success'] else 'Failed'} | Fee: {tx_data.get('fee', 0):.9f} SOL",
+                                        size=12,
+                                        color="green" if tx_data['success'] else "red"
+                                    ),
+                                    flet.Text(f"Slot: {tx_data.get('slot')} | Version: {tx_data.get('version')} | CU Consumed: {tx_data.get('compute_units')}", size=12, color="blue"),
+                                    logs_column
+                                ]
+                            )
+
+                            # Обработчик кнопки-стрелки
+                            def toggle_details(e):
+                                details_col.visible = not details_col.visible
+                                e.control.icon = flet.Icons.ARROW_DROP_UP if details_col.visible else flet.Icons.ARROW_DROP_DOWN
+                                e.control.update()
+                                details_col.update()
+
+                            return flet.Card(
+                                content=flet.Container(
+                                    padding=10,
+                                    content=flet.Column([
+                                        flet.Row([
+                                            flet.Column([
+                                                flet.Text(f"{t_str} • {tx_data.get('tx_type', 'Unknown')}", size=12, weight=flet.FontWeight.BOLD, color="grey700"),
+                                                flet.Text(spans=b_spans),
+                                            ], expand=True),
+                                            flet.IconButton(
+                                                icon=flet.Icons.ARROW_DROP_DOWN,
+                                                icon_size=30,
+                                                on_click=toggle_details
+                                            )
+                                        ], alignment=flet.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=flet.CrossAxisAlignment.START),
+                                        details_col
+                                    ])
+                                )
+                            )
+
+                        # Добавляем созданную интерактивную карточку в общий список
+                        tmp_history_result.append(create_tx_card(tx, time_str, balance_spans))
+
+                else:
+                    tmp_history_result.append(flet.Text("No transactions found.", italic=True))
+
+                tmp_history_result.append(flet.Divider(thickness=1))
+
+            el_token_balance_data.controls.clear()
+            el_token_balance_data.controls.extend(tmp_history_result)
+            e.control.disabled = False  # разблокируем кнопку
+
+        except Exception as er:
+            print(f'Error get_history_button_click: {er}')
+            page.show_dialog(
+                flet.AlertDialog(title=flet.Text("Error loading history!"))
+            )
+            e.control.disabled = False
+        finally:
+            page.update()
 
     async def get_balance_button_click(e):
         try:
@@ -273,7 +494,7 @@ async def main(page: flet.Page):
             page.update()
             tmp_balance_result = []
             start = datetime.now()
-            result = get_sol_spl_balance(wallet['address_base58'], networks)
+            result = await get_sol_spl_balance(wallet['address_base58'], networks)
             print(f'****** get_sol_spl_balance result: {result}')
 
             for i, r in enumerate(result):
@@ -694,7 +915,7 @@ async def main(page: flet.Page):
                         print(f"decimals: {data['raw_data']['decimals']}")
                         print(f"network: {data['network']}")
                         print("------------------------------------------")
-                        result = transfer_spl_token(
+                        result = await transfer_spl_token(
                             sender_address=data['wallet_address'],
                             sender_private_key=private_key_hex,
                             recipient_address=recipient_address,
@@ -847,13 +1068,13 @@ async def main(page: flet.Page):
                 if is_valid_amount(transfer_sol_amount):
                     transfer_sol_amount = float(transfer_sol_amount)
 
-                    min_sol_balance = get_min_sol_balance(data['network'])
+                    min_sol_balance = await get_min_sol_balance(data['network'])
                     # print(f'**** min_sol_balance: {min_sol_balance}')
                     if min_sol_balance is None:
                         min_sol_balance = 0
 
                     if (transfer_sol_amount > 0) and (transfer_sol_amount < data['sol_amount'] - min_sol_balance):
-                        result = transfer_sol_token(
+                        result = await transfer_sol_token(
                             sender_address=data['wallet_data']['address_base58'],
                             sender_private_key=data['wallet_data']['private_key_hex'],
                             recipient_address=recipient_address,
@@ -863,7 +1084,7 @@ async def main(page: flet.Page):
                         # print(f'****** RESULT: {result}')
 
                         if 'result' in result:
-                            sol_balance_after = get_sol_balance(address=data['wallet_data']['address_base58'], network=data['network'])
+                            sol_balance_after = await get_sol_balance(address=data['wallet_data']['address_base58'], network=data['network'])
                             if sol_balance_after:
                                 e.control.parent.parent.controls[2].controls[0].spans=[
                                     flet.TextSpan('Amount: ', flet.TextStyle(size=16)),
@@ -991,7 +1212,6 @@ async def main(page: flet.Page):
         e.control.disabled = False  # разблокируем кнопку
         page.update()
 
-
     async def request_airdrop_sol_button_click(e):
         data = e.control.data
         print(f'****** request_airdrop_sol_button_click >> e.control.data: {data}')
@@ -1008,7 +1228,7 @@ async def main(page: flet.Page):
         recipient_address = ''
 
         if is_valid_wallet_address(data['wallet_address']):
-            result = request_airdrop(pubkey=data['wallet_address'], lamports=1_000_000_000, network=data['network'])
+            result = await request_airdrop(pubkey=data['wallet_address'], lamports=1_000_000_000, network=data['network'])
 
             alert_dialog_text = f"The result airdrop SOL for wallet address: {data['wallet_address']}: {result}"
 
@@ -1217,7 +1437,7 @@ async def main(page: flet.Page):
                     flet.Row(
                         [
                             generate_new_solana_wallet_card_save_button,
-                            flet.TextButton("Copy"),
+                            flet.TextButton("Copy", on_click=lambda e: page.run_task(copy_wallet_data_click, e, 'create')),
                             generate_new_solana_wallet_card_clear_button,
                         ],
                         alignment=flet.MainAxisAlignment.END,
@@ -1252,7 +1472,7 @@ async def main(page: flet.Page):
                     flet.Row(
                         [
                             recover_solana_wallet_card_save_button,
-                            flet.TextButton("Copy"),
+                            flet.TextButton("Copy", on_click=lambda e: page.run_task(copy_wallet_data_click, e, 'recover')),
                             recover_solana_wallet_card_clear_button,
                         ],
                         alignment=flet.MainAxisAlignment.END,
@@ -1279,7 +1499,7 @@ async def main(page: flet.Page):
                     flet.Row(
                         [
                             add_address_solana_wallet_card_save_button,
-                            flet.TextButton("Copy"),
+                            flet.TextButton("Copy", on_click=lambda e: page.run_task(copy_wallet_data_click, e, 'add')),
                             add_address_solana_wallet_card_clear_button,
                         ],
                         alignment=flet.MainAxisAlignment.END,
@@ -1290,6 +1510,40 @@ async def main(page: flet.Page):
             padding=10,
         )
     )
+
+    async def copy_wallet_data_click(e, mode):
+        data_to_copy = {}
+        if mode == 'create':
+            data_to_copy = {
+                'created': txt_wallet_created.value,
+                'name': txt_wallet_name.value,
+                'description': txt_wallet_description.value,
+                'address_base58': txt_wallet_address.value,
+                'private_key_hex': txt_private_key.value,
+                'public_key_hex': txt_public_key.value,
+                'words': txt_words.value,
+                'secret_key_base58': txt_secret_key_base58.value,
+            }
+        elif mode == 'recover':
+            data_to_copy = {
+                'created': txt_recover_wallet_created.value,
+                'name': txt_recover_wallet_name.value,
+                'description': txt_recover_wallet_description.value,
+                'address_base58': txt_recover_wallet_address.value,
+                'private_key_hex': txt_recover_private_key.value,
+                'public_key_hex': txt_recover_public_key.value,
+                'words': txt_recover_words.value,
+                'secret_key_base58': txt_recover_secret_key_base58.value,
+            }
+        elif mode == 'add':
+            data_to_copy = {
+                'created': txt_add_address_wallet_created.value,
+                'name': txt_add_address_wallet_name.value,
+                'description': txt_add_address_wallet_description.value,
+                'address_base58': txt_add_address_wallet_address.value,
+            }
+        await page.clipboard.set(json.dumps(data_to_copy, indent=2))
+        page.show_dialog(flet.AlertDialog(title=flet.Text("Data copied to clipboard!")))
 
     error_generate_new_solana_wallet_card = flet.Card(
         content=flet.Container(
@@ -1543,6 +1797,7 @@ async def main(page: flet.Page):
 
     async def route_change(route):
         page.views.clear()
+        homepage.controls[-1] = await get_wallets_cards()
         page.views.append(homepage)
         if page.route == "create-wallet-page":
             page.views.append(create_wallet_page)

@@ -11,7 +11,6 @@ from solana.spl_token import get_token_program_id, get_associated_token_address,
 from solana.transfer_sol import confirm_transaction, get_blockhash
 
 
-
 def transfer_spl_token(
     sender_address: str,
     sender_private_key: str,
