@@ -1,9 +1,9 @@
 [project]
-name = "solana_wallet_v2"
+name = "solana_wallet_v3"
 version = "0.1.0"
 description = ""
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 authors = [
     { name = "Flet developer", email = "you@example.com" }
 ]
@@ -11,9 +11,10 @@ dependencies = [
   "base58==2.1.1",
   "cryptography==43.0.1",
   "mnemonic==0.21",
-  "requests==2.32.3",
+  "requests==2.32.5",
   "PyNaCl==1.5.0",
-  "flet==0.28.3"
+  "typing_extensions==4.15.0",
+  "flet==0.82.2"
 ]
 
 [tool.flet]
@@ -23,7 +24,7 @@ org = "com.mycompany"
 
 # project display name that is used as an app title on Android and iOS home screens,
 # shown in window titles and about app dialogs on desktop.
-product = "Solana Wallet v2"
+product = "Solana Wallet v3"
 
 # company name to display in about app dialogs
 company = "Flet"
@@ -39,16 +40,17 @@ dev-dependencies = [
   "base58==2.1.1",
   "cryptography==43.0.1",
   "mnemonic==0.21",
-  "requests==2.32.3",
+  "requests==2.32.5",
   "PyNaCl==1.5.0",
-  "flet==0.28.3"
+  "typing_extensions==4.15.0",
+  "flet==0.82.2"
 ]
 
 [tool.poetry]
 package-mode = false
 
 [tool.poetry.group.dev.dependencies]
-flet = {extras = ["all"], version = "0.28.3"}
+flet = {extras = ["all"], version = "0.82.2"}
 
 [tool.flet.android.permission]
 "android.permission.INTERNET" = true

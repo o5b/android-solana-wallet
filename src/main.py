@@ -2,6 +2,7 @@ from datetime import datetime
 import time
 import flet
 import base64
+import json
 
 from solana.create_wallet import create_solana_wallet
 from solana.balance import get_sol_spl_balance, get_sol_balance
@@ -12,24 +13,24 @@ from solana.validators import is_valid_amount, is_valid_wallet_address, is_valid
 
 # LAMPORT_TO_SOL_RATIO = 10 ** 9
 
-def main(page: flet.Page):
+async def main(page: flet.Page):
     page.scroll = flet.ScrollMode.AUTO
     page.title = "Solana Wallet Generator"
     page.vertical_alignment = flet.MainAxisAlignment.CENTER
     page.horizontal_alignment = flet.CrossAxisAlignment.CENTER
     page.bgcolor = 'white'
-    page.padding = flet.padding.only(top=50, left=10, right=10)
+    page.padding = flet.Padding(top=50, left=10, right=10, bottom=10)
     # page.scroll = flet.ScrollMode.AUTO
     # page.theme_mode = flet.ThemeMode.LIGHT
 
-    if page.client_storage.contains_key("theme_mode"):
-        if page.client_storage.get("theme_mode") == 'LIGHT':
+    if await page.shared_preferences.contains_key("theme_mode"):
+        if await page.shared_preferences.get("theme_mode") == 'LIGHT':
             page.theme_mode = flet.ThemeMode.LIGHT
-        elif page.client_storage.get("theme_mode") == 'DARK':
+        elif await page.shared_preferences.get("theme_mode") == 'DARK':
             page.theme_mode = flet.ThemeMode.DARK
     else:
         page.theme_mode = flet.ThemeMode.LIGHT
-        page.client_storage.set("theme_mode", "LIGHT")
+        await page.shared_preferences.set("theme_mode", "LIGHT")
 
     input_wallet_name = flet.TextField(label="Wallet Name", min_lines=1, max_lines=1, max_length=50)
     input_wallet_description = flet.TextField(label="Wallet description", min_lines=2, max_lines=5, max_length=200)
@@ -73,17 +74,23 @@ def main(page: flet.Page):
     txt_add_address_error = flet.Text(selectable=True)
     txt_add_address_wallet_created = flet.Text(selectable=True)
 
-    def get_storage_data(prefix=''):
+    async def get_storage_data(prefix=''):
         data_list = []
-        keys = page.client_storage.get_keys(prefix)
+        keys = await page.shared_preferences.get_keys(prefix)
         print(f'keys: {keys}')
         for key in keys:
-            data_list.append(page.client_storage.get(key))
+            val = await page.shared_preferences.get(key)
+            if isinstance(val, str):
+                try:
+                    val = json.loads(val)
+                except json.JSONDecodeError:
+                    pass
+            data_list.append(val)
         print(f'data_list: {data_list}')
         return data_list
 
-    def get_wallets_cards():
-        wallets = get_storage_data(prefix="wallet.")
+    async def get_wallets_cards():
+        wallets = await get_storage_data(prefix="wallet.")
         print(f'wallets: {wallets}')
         lv = flet.ListView(expand=1, spacing=10, padding=20, auto_scroll=True)
         for wallet in wallets:
@@ -126,7 +133,7 @@ def main(page: flet.Page):
                                 flet.Row(
                                     [
                                         flet.ElevatedButton(
-                                            text="Show More",
+                                            content=flet.Text("Show More"),
                                             on_click=go_to_address_page,
                                             data=wallet,
                                         ),
@@ -147,7 +154,7 @@ def main(page: flet.Page):
     el_address_page = flet.Column()
     el_token_balance_data = flet.Column()
 
-    def go_to_address_page(e):
+    async def go_to_address_page(e):
         print(f'****** go_to_address_page e.control.data: {e.control.data}')
         wallet = e.control.data
         el_address_page.controls = [
@@ -230,7 +237,7 @@ def main(page: flet.Page):
             flet.Row(
                 [
                     flet.ElevatedButton(
-                        text="Show Balance",
+                        content=flet.Text("Show Balance"),
                         on_click=get_balance_button_click,
                         # data=wallet['address_base58'],
                         data=wallet,
@@ -240,9 +247,9 @@ def main(page: flet.Page):
             ),
             el_token_balance_data,
         ]
-        page.go("address-page")
+        await page.push_route("address-page")
 
-    def get_balance_button_click(e):
+    async def get_balance_button_click(e):
         try:
             wallet = e.control.data
             print(f'****** address >> get_balance_button_click: {wallet}')
@@ -282,26 +289,30 @@ def main(page: flet.Page):
                     spl_token_logo = flet.Image(
                         width=100,
                         height=100,
-                        fit=flet.ImageFit.CONTAIN,
+                        src="spl-token-placeholder.png",
+                        # fit=flet.ImageFit.CONTAIN,
+                        fit=flet.BoxFit.CONTAIN,
                         border_radius=flet.border_radius.all(10),
                     )
-                    image_base64 = ''
+                    # image_base64 = ''
+                    # if 'logo' in spl_token and spl_token['logo']:
+                    #     # Конвертируем байты в base64-строку
+                    #     try:
+                    #         image_base64 = base64.b64encode(spl_token['logo']).decode("utf-8")
+                    #     except Exception as er:
+                    #         print(f'Error при конвертации байтов изображения в base64-строку. Msg: {er}')
+                    # if image_base64:
+                    #     spl_token_logo.src_base64 = image_base64
+                    # else:
+                    #     spl_token_logo.src = "spl-token-placeholder.png"
                     if 'logo' in spl_token and spl_token['logo']:
-                        # Конвертируем байты в base64-строку
-                        try:
-                            image_base64 = base64.b64encode(spl_token['logo']).decode("utf-8")
-                        except Exception as er:
-                            print(f'Error при конвертации байтов изображения в base64-строку. Msg: {er}')
-                    if image_base64:
-                        spl_token_logo.src_base64 = image_base64
-                    else:
-                        spl_token_logo.src = "spl-token-placeholder.png"
+                        spl_token_logo.src = spl_token['logo']
                     tmp_balance_spl.extend(
                         [
                             flet.Row(
                                 [
                                     flet.ElevatedButton(
-                                        text="Transfer this token",
+                                        content=flet.Text("Transfer this token"),
                                         on_click=go_to_spl_token_page_button_click,
                                         data={
                                             'wallet_address': wallet['address_base58'],
@@ -341,7 +352,7 @@ def main(page: flet.Page):
                                             flet.TextButton(
                                                 content=flet.Row(
                                                     [
-                                                        flet.Icon(name=flet.Icons.ARROW_DROP_DOWN, size=50),
+                                                        flet.Icon(flet.Icons.ARROW_DROP_DOWN, size=50),
                                                     ],
                                                 ),
                                                 on_click=spl_token_arrow_drop_down_button_click,
@@ -358,7 +369,7 @@ def main(page: flet.Page):
                 if r['network'] == "https://api.testnet.solana.com" or r['network'] == "https://api.devnet.solana.com":
                     tmp_request_airdrop.append(
                         flet.ElevatedButton(
-                            text="Request Airdrop 1 SOL",
+                            content=flet.Text("Request Airdrop 1 SOL"),
                             on_click=request_airdrop_sol_button_click,
                             data={
                                 'wallet_address': wallet['address_base58'],
@@ -383,7 +394,7 @@ def main(page: flet.Page):
                         flet.Row(
                             [
                                 flet.ElevatedButton(
-                                    text="Transfer this token",
+                                    content=flet.Text("Transfer this token"),
                                     on_click=go_to_token_page_button_click,
                                     data={
                                         # 'wallet_address': e.control.data,
@@ -414,14 +425,14 @@ def main(page: flet.Page):
             el_token_balance_data.controls.extend([flet.Divider(thickness=3), *tmp_balance_result])
             e.control.disabled = False  # разблокируем кнопку
             print(f'time: {datetime.now() - start} sec')
-            page.open(
+            page.show_dialog(
                 flet.AlertDialog(
                     title=flet.Text(f"Balance for {wallet['address_base58']} received successfully!"),
                 )
             )
         except Exception as er:
             print(f'Error get_balance_button_click: {er}')
-            page.open(
+            page.show_dialog(
                 flet.AlertDialog(
                     title=flet.Text("Error get_balance_button_click!"),
                 )
@@ -432,7 +443,7 @@ def main(page: flet.Page):
     el_token_page = flet.Column()
     el_spl_token_page = flet.Column()
 
-    def spl_token_arrow_drop_down_button_click(e):
+    async def spl_token_arrow_drop_down_button_click(e):
         try:
             data = e.control.data
             print(f'****** spl_token_arrow_drop_down_button_click >> data: {data}')
@@ -445,7 +456,7 @@ def main(page: flet.Page):
                         flet.TextButton(
                             content=flet.Row(
                                 [
-                                    flet.Icon(name=flet.Icons.ARROW_DROP_UP, size=50),
+                                    flet.Icon(flet.Icons.ARROW_DROP_UP, size=50),
                                 ],
                             ),
                             on_click=spl_token_arrow_drop_up_button_click,
@@ -495,7 +506,7 @@ def main(page: flet.Page):
             )
         except Exception as er:
             print(f'Error spl_token_arrow_drop_down_button_click: {er}')
-            page.open(
+            page.show_dialog(
                 flet.AlertDialog(
                     title=flet.Text("Error spl_token_arrow_drop_down_button_click!"),
                 )
@@ -503,7 +514,7 @@ def main(page: flet.Page):
         finally:
             page.update()
 
-    def spl_token_arrow_drop_up_button_click(e):
+    async def spl_token_arrow_drop_up_button_click(e):
         try:
             data = e.control.data
             e.control.parent.parent.controls.clear()
@@ -513,7 +524,7 @@ def main(page: flet.Page):
                         flet.TextButton(
                             content=flet.Row(
                                 [
-                                    flet.Icon(name=flet.Icons.ARROW_DROP_DOWN, size=50),
+                                    flet.Icon(flet.Icons.ARROW_DROP_DOWN, size=50),
                                 ],
                             ),
                             on_click=spl_token_arrow_drop_down_button_click,
@@ -525,7 +536,7 @@ def main(page: flet.Page):
             )
         except Exception as er:
             print(f'Error spl_token_arrow_drop_up_button_click: {er}')
-            page.open(
+            page.show_dialog(
                 flet.AlertDialog(
                     title=flet.Text("Error spl_token_arrow_drop_up_button_click!"),
                 )
@@ -550,7 +561,7 @@ def main(page: flet.Page):
     #         alert_text = f"Copied: {data}"
     #     print(alert_text)
 
-    def go_to_spl_token_page_button_click(e):
+    async def go_to_spl_token_page_button_click(e):
         print(f'****** go_to_spl_token_page_button_click >> e.control.data: {e.control.data}')
         data = e.control.data
         el_spl_token_page.controls.clear()
@@ -617,7 +628,7 @@ def main(page: flet.Page):
                 flet.Row(
                     [
                         flet.ElevatedButton(
-                            text="Transfer Token",
+                            content=flet.Text("Transfer Token"),
                             on_click=transfer_spl_button_click,
                             data=data,
                         ),
@@ -635,10 +646,10 @@ def main(page: flet.Page):
                     ],
                 )
             )
-        page.go("spl-token-page")
+        await page.push_route("spl-token-page")
 
 
-    def transfer_spl_button_click(e):
+    async def transfer_spl_button_click(e):
         data = e.control.data
         e.control.disabled = True
         e.control.parent.parent.controls[-1].controls.clear()
@@ -709,13 +720,13 @@ def main(page: flet.Page):
         if not alert_dialog_text:
              alert_dialog_text = "Could not proceed with transfer. Private key is missing or invalid."
 
-        page.open(flet.AlertDialog(title=flet.Text(alert_dialog_text)))
+        page.show_dialog(flet.AlertDialog(title=flet.Text(alert_dialog_text)))
         e.control.parent.parent.controls[-1].controls.clear()
         e.control.disabled = False
         page.update()
 
 
-    def go_to_token_page_button_click(e):
+    async def go_to_token_page_button_click(e):
         print(f'****** go_to_token_page_button_click >> e.control.data: {e.control.data}')
         data = e.control.data
         el_token_page.controls.clear()
@@ -771,7 +782,7 @@ def main(page: flet.Page):
                 flet.Row(
                     [
                         flet.ElevatedButton(
-                            text="Transfer SOL",
+                            content=flet.Text("Transfer SOL"),
                             on_click=transfer_sol_button_click,
                             data=data,
                         ),
@@ -789,10 +800,10 @@ def main(page: flet.Page):
                     ],
                 )
             )
-        page.go("token-page")
+        await page.push_route("token-page")
 
 
-    def transfer_sol_button_click(e):
+    async def transfer_sol_button_click(e):
         data = e.control.data
         # print(f'****** transfer_sol_button_click >> e.control.data: {data}')
         e.control.disabled = True  # блокируем кнопку
@@ -874,7 +885,7 @@ def main(page: flet.Page):
                     alert_dialog_text = f"The amount of SOL={transfer_sol_amount} is not valid. Please enter the correct number."
             else:
                 alert_dialog_text = f"The recipient wallet address: {recipient_address} is not valid. Please enter the correct recipient wallet address."
-        page.open(
+        page.show_dialog(
             flet.AlertDialog(
                 title=flet.Text(alert_dialog_text),
             )
@@ -981,7 +992,7 @@ def main(page: flet.Page):
         page.update()
 
 
-    def request_airdrop_sol_button_click(e):
+    async def request_airdrop_sol_button_click(e):
         data = e.control.data
         print(f'****** request_airdrop_sol_button_click >> e.control.data: {data}')
         e.control.disabled = True  # блокируем кнопку
@@ -1001,7 +1012,7 @@ def main(page: flet.Page):
 
             alert_dialog_text = f"The result airdrop SOL for wallet address: {data['wallet_address']}: {result}"
 
-        page.open(
+        page.show_dialog(
             flet.AlertDialog(
                 title=flet.Text(alert_dialog_text),
             )
@@ -1014,7 +1025,7 @@ def main(page: flet.Page):
         page.update()
 
 
-    def generate_new_solana_wallet_card_save_button_clicked(e):
+    async def generate_new_solana_wallet_card_save_button_clicked(e):
         key = f"wallet.{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
         value = {}
         value['created'] = datetime.now().strftime('%Y-%m-%d %H-%M-%S')
@@ -1029,7 +1040,7 @@ def main(page: flet.Page):
         print(f'generate_new_wallet_storage >> key: {key}')
         print(f'generate_new_wallet_storage >> value: {value}')
 
-        page.client_storage.set(key, value)
+        await page.shared_preferences.set(key, json.dumps(value))
 
         txt_error.value = ''
         txt_wallet_created.value = ''
@@ -1050,7 +1061,7 @@ def main(page: flet.Page):
     )
 
 
-    def recover_solana_wallet_card_save_button_clicked(e):
+    async def recover_solana_wallet_card_save_button_clicked(e):
         key = f"wallet.{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
         value = {}
         value['created'] = datetime.now().strftime('%Y-%m-%d %H-%M-%S')
@@ -1065,7 +1076,7 @@ def main(page: flet.Page):
         print(f'recover_wallet_storage >> key: {key}')
         print(f'recover_wallet_storage >> value: {value}')
 
-        page.client_storage.set(key, value)
+        await page.shared_preferences.set(key, json.dumps(value))
 
         txt_recover_error.value = ''
         txt_recover_wallet_created.value = ''
@@ -1087,7 +1098,7 @@ def main(page: flet.Page):
     )
 
 
-    def add_address_solana_wallet_card_save_button_clicked(e):
+    async def add_address_solana_wallet_card_save_button_clicked(e):
         key = f"wallet.{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
         value = {}
         value['created'] = datetime.now().strftime('%Y-%m-%d %H-%M-%S')
@@ -1102,7 +1113,7 @@ def main(page: flet.Page):
         print(f'add_address_wallet_storage >> key: {key}')
         print(f'add_address_wallet_storage >> value: {value}')
 
-        page.client_storage.set(key, value)
+        await page.shared_preferences.set(key, json.dumps(value))
 
         txt_add_address_error.value = ''
         txt_add_address_wallet_created.value = ''
@@ -1118,7 +1129,7 @@ def main(page: flet.Page):
         data=0,
     )
 
-    def generate_new_solana_wallet_card_clear_button_clicked(e):
+    async def generate_new_solana_wallet_card_clear_button_clicked(e):
         txt_error.value = ''
         txt_wallet_created.value = ''
         txt_wallet_name.value = ''
@@ -1140,7 +1151,7 @@ def main(page: flet.Page):
         data=0,
     )
 
-    def recover_solana_wallet_card_clear_button_clicked(e):
+    async def recover_solana_wallet_card_clear_button_clicked(e):
         txt_recover_error.value = ''
         txt_recover_wallet_created.value = ''
         txt_recover_wallet_name.value = ''
@@ -1163,7 +1174,7 @@ def main(page: flet.Page):
         data=0,
     )
 
-    def add_address_solana_wallet_card_clear_button_clicked(e):
+    async def add_address_solana_wallet_card_clear_button_clicked(e):
         txt_add_address_error.value = ''
         txt_add_address_wallet_created.value = ''
         txt_add_address_wallet_name.value = ''
@@ -1319,7 +1330,7 @@ def main(page: flet.Page):
         )
     )
 
-    def generate_new_solana_wallet_button(e):
+    async def generate_new_solana_wallet_button(e):
         if generate_new_solana_wallet_card in create_wallet_page.controls:
             create_wallet_page.controls.remove(generate_new_solana_wallet_card)
         if error_generate_new_solana_wallet_card in create_wallet_page.controls:
@@ -1341,7 +1352,7 @@ def main(page: flet.Page):
             create_wallet_page.controls.append(generate_new_solana_wallet_card)
         page.update()
 
-    def recover_solana_wallet_button(e):
+    async def recover_solana_wallet_button(e):
         if recover_solana_wallet_card in recover_wallet_page.controls:
             recover_wallet_page.controls.remove(recover_solana_wallet_card)
         if error_recover_solana_wallet_card in recover_wallet_page.controls:
@@ -1368,7 +1379,7 @@ def main(page: flet.Page):
             recover_wallet_page.controls.append(recover_solana_wallet_card)
         page.update()
 
-    def add_address_solana_wallet_button(e):
+    async def add_address_solana_wallet_button(e):
         if add_address_solana_wallet_card in add_wallet_address_page.controls:
             add_wallet_address_page.controls.remove(add_address_solana_wallet_card)
         if error_add_address_solana_wallet_card in add_wallet_address_page.controls:
@@ -1389,62 +1400,70 @@ def main(page: flet.Page):
             add_wallet_address_page.controls.append(add_address_solana_wallet_card)
         page.update()
 
-    def theme_changed(e):
+    async def theme_changed(e):
         page.theme_mode = flet.ThemeMode.DARK if page.theme_mode == flet.ThemeMode.LIGHT else flet.ThemeMode.LIGHT
         theme_control.label = "Light theme" if page.theme_mode == flet.ThemeMode.LIGHT else "Dark theme"
         if page.theme_mode == flet.ThemeMode.LIGHT:
-            page.client_storage.set("theme_mode", "LIGHT")
+            await page.shared_preferences.set("theme_mode", "LIGHT")
         else:
-            page.client_storage.set("theme_mode", "DARK")
+            await page.shared_preferences.set("theme_mode", "DARK")
         page.update()
 
     theme_control = flet.Switch(label="Light theme", on_change=theme_changed)
 
-    def dev_tools_storage_list():
+    async def dev_tools_storage_list():
         lv = flet.ListView(expand=1, spacing=10, padding=20, auto_scroll=True)
-        for i, key in enumerate(page.client_storage.get_keys('')):
-            val = page.client_storage.get(key)
+        keys = await page.shared_preferences.get_keys('')
+        for i, key in enumerate(keys):
+            val = await page.shared_preferences.get(key)
+            if isinstance(val, str):
+                try:
+                    val = json.loads(val)
+                except json.JSONDecodeError:
+                    pass
             lv.controls.append(
                 flet.Row(
                     scroll=flet.ScrollMode.AUTO,
                     controls=[
-                        flet.ElevatedButton(text="Delete", on_click=storage_delete_button_click, data=key),
+                        flet.ElevatedButton(content="Delete", on_click=storage_delete_button_click, data=key),
                         flet.Text(f"{i+1}. {key}: {val}", max_lines=2),
                     ]
                 )
             )
         return lv
 
-    def storage_delete_button_click(e):
+    async def storage_delete_button_click(e):
         try:
-            page.client_storage.remove(e.control.data)
-            page.open(
-                flet.AlertDialog(
-                    title=flet.Text(f"{e.control.data} успешно удалён!"),
-                )
-            )
+            await page.shared_preferences.remove(e.control.data)
         except Exception as er:
-            print(f'Error deleted data from client_storage: {er}')
-            page.open(
+            print(f'Error deleted data from shared_preferences: {er}')
+            page.show_dialog(
                 flet.AlertDialog(
                     title=flet.Text("Во время удаления произошла ошибка!"),
                 )
             )
+        else:
+            page.show_dialog(
+                flet.AlertDialog(
+                    title=flet.Text(f"{e.control.data} успешно удалён!"),
+                )
+            )
         page.update()
 
-    def clear_client_storage():
-        for key in page.client_storage.get_keys(''):
-            page.client_storage.remove(key)
+    async def clear_client_storage():
+        keys = await page.shared_preferences.get_keys('')
+        for key in keys:
+            await page.shared_preferences.remove(key)
 
-    def selected_drawer(e):
+    async def selected_drawer(e):
         print(f'e.control.selected_index: {e.control.selected_index}')
         if e.control.selected_index == 0:
-            # page.go('settings-page')
+            # await page.push_route('settings-page')
             pass
         elif e.control.selected_index == 3:
-            page.go('dev-storage-page')
+            await page.push_route('dev-storage-page')
         elif e.control.selected_index == 4:
-            clear_client_storage()
+            await clear_client_storage()
 
     drawer = flet.NavigationDrawer(
         # on_dismiss=handle_dismissal,
@@ -1483,44 +1502,46 @@ def main(page: flet.Page):
         ],
     )
 
-    def selected_navbar(e):
+    async def selected_navbar(e):
         print(f'e.control.selected_index: {e.control.selected_index}')
         if e.control.selected_index == 1:
-            page.go("create-wallet-page")
+            await page.push_route("create-wallet-page")
         elif e.control.selected_index == 2:
-            page.go("recover-wallet-page")
+            await page.push_route("recover-wallet-page")
         elif e.control.selected_index == 3:
-            page.go("add-wallet-address-page")
+            await page.push_route("add-wallet-address-page")
+        elif e.control.selected_index == 4:
+            await page.window.destroy()
         else:
-            page.go("/")
+            await page.push_route("/")
 
     navbar = flet.NavigationBar(
         on_change = selected_navbar,
         destinations=[
-            flet.NavigationDrawerDestination(
+            flet.NavigationBarDestination(
                 label="Menu",
                 icon=flet.Icon(flet.Icons.GRID_VIEW_ROUNDED),
             ),
-            flet.NavigationDrawerDestination(
+            flet.NavigationBarDestination(
                 label="New",
                 icon=flet.Icon(flet.Icons.CODE),
             ),
-            flet.NavigationDrawerDestination(
+            flet.NavigationBarDestination(
                 label="Recover",
                 icon=flet.Icon(flet.Icons.ROCKET_LAUNCH_OUTLINED),
             ),
-            flet.NavigationDrawerDestination(
+            flet.NavigationBarDestination(
                 label="Add",
                 icon=flet.Icon(flet.Icons.CODE),
             ),
-            flet.NavigationDrawerDestination(
+            flet.NavigationBarDestination(
                 label="Exit",
                 icon=flet.Icon(flet.Icons.CANCEL),
             ),
        ]
     )
 
-    def route_change(route):
+    async def route_change(route):
         page.views.clear()
         page.views.append(homepage)
         if page.route == "create-wallet-page":
@@ -1542,44 +1563,48 @@ def main(page: flet.Page):
         #     page.views.append(homepage)
         page.update()
 
-    def view_pop(view):
+    async def view_pop(view):
         print(f'########### start >> page.views >> len={len(page.views)}, page.views: {page.views}')
         page.views.pop()
         print(f'########### after pop() >> page.views >> len={len(page.views)}, page.views: {page.views}')
         top_view = page.views[-1]
-        page.go(top_view.route)
+        await page.push_route(top_view.route)
 
+    async def nav_recover(e): await page.push_route("recover-wallet-page")
     recover_wallet_button = flet.OutlinedButton(
         height=100,
         width=100,
         content=flet.Container(
-            padding=5,
+            width=200,
             content=flet.Column(controls=[flet.Image(src="recover.png"), flet.Text('Recover Wallet', size=12)])
         ),
         style=flet.ButtonStyle(shape=flet.RoundedRectangleBorder(radius=10)),
-        on_click=lambda _:page.go("recover-wallet-page")
+        on_click=nav_recover
     )
 
+    async def nav_add(e): await page.push_route("add-wallet-address-page")
     add_wallet_address_button = flet.OutlinedButton(
         height=100,
         width=100,
         content=flet.Container(
-            padding=5,
+            width=200,
             content=flet.Column(controls=[flet.Image(src="add.png"), flet.Text('Add Wallet Address', size=12)])
         ),
         style=flet.ButtonStyle(shape=flet.RoundedRectangleBorder(radius=10)),
-        on_click=lambda _:page.go("add-wallet-address-page")
+        on_click=nav_add
     )
 
+    async def nav_create(e): await page.push_route('create-wallet-page')
     create_wallet_button = flet.OutlinedButton(
         height=100,
         width=100,
         content=flet.Container(
-            padding=5,
+            width=200,
             content=flet.Column(controls=[flet.Image(src="create.png"), flet.Text('New Wallet')])
         ),
         style=flet.ButtonStyle(shape=flet.RoundedRectangleBorder(radius=10)),
-        on_click=lambda _:page.go('create-wallet-page')
+        on_click=nav_create
+        # on_click=lambda _:await page.push_route('create-wallet-page')
     )
 
     button_group_1 = flet.Row(
@@ -1608,7 +1633,7 @@ def main(page: flet.Page):
             flet.Text('Solana', size=30, font_family="Georgia", weight=flet.FontWeight.BOLD),
             button_group_1,
             flet.Text('Wallets:', size=30, font_family="Georgia", weight=flet.FontWeight.BOLD),
-            get_wallets_cards(),
+            await get_wallets_cards(),
         ],
     )
 
@@ -1631,7 +1656,7 @@ def main(page: flet.Page):
             flet.Row([input_recover_wallet_secret], alignment=flet.MainAxisAlignment.CENTER),
             flet.Row(
                 [
-                    flet.OutlinedButton(text='Recover Wallet', width=200, height=40, on_click=recover_solana_wallet_button)
+                    flet.OutlinedButton(content=flet.Text('Recover Wallet'), width=200, height=40, on_click=recover_solana_wallet_button)
                 ],
                 alignment=flet.MainAxisAlignment.CENTER,
             ),
@@ -1656,7 +1681,7 @@ def main(page: flet.Page):
             flet.Row([input_add_wallet_address], alignment=flet.MainAxisAlignment.CENTER),
             flet.Row(
                 [
-                    flet.OutlinedButton(text='Add Wallet Address', width=200, height=40, on_click=add_address_solana_wallet_button)
+                    flet.OutlinedButton(content=flet.Text('Add Wallet Address'), width=200, height=40, on_click=add_address_solana_wallet_button)
                 ],
                 alignment=flet.MainAxisAlignment.CENTER,
             ),
@@ -1681,7 +1706,7 @@ def main(page: flet.Page):
             flet.Row([input_wallet_description], alignment=flet.MainAxisAlignment.CENTER),
             flet.Row(
                 [
-                    flet.OutlinedButton(text='Create New Wallet', width=200, height=40, on_click=generate_new_solana_wallet_button)
+                    flet.OutlinedButton(content=flet.Text('Create New Wallet'), width=200, height=40, on_click=generate_new_solana_wallet_button)
                 ],
                 alignment=flet.MainAxisAlignment.CENTER,
             ),
@@ -1701,7 +1726,7 @@ def main(page: flet.Page):
         scroll=flet.ScrollMode.AUTO,
         controls=[
             flet.Text(value='Редактирование client_storage:', size=20),
-            dev_tools_storage_list(),
+            await dev_tools_storage_list(),
         ]
     )
 
@@ -1758,8 +1783,9 @@ def main(page: flet.Page):
 
     page.on_route_change = route_change
     page.on_view_pop = view_pop
-    page.go(page.route)
+    await route_change(None) # Manually trigger the initial UI load since push_route is ignored on identical paths
+    await page.push_route(page.route)
     page.update()
 
 
-flet.app(target=main)
+flet.run(main)
