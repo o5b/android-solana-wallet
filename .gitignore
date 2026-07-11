@@ -166,3 +166,14 @@ tmp/
 
 android-solana-wallet.code-workspace
 flet_source
+
+# Secrets — test private keys (never commit)
+devnet-wallets.txt
+mainnet-wallets.txt
+*-wallets.txt
+*.secrets
+secrets/
+
+
+.kilocodeignore
+.kilo/

@@ -17,7 +17,7 @@ async def get_sol_balance(address, network):
         "jsonrpc": "2.0",
         "id": 1,
         "method": "getBalance",
-        "params": [address]
+        "params": [address, {"commitment": "confirmed"}]
     }
     async with httpx.AsyncClient() as client:
         response = await client.post(url, headers=headers, json=payload)
@@ -40,7 +40,7 @@ async def get_spl_balances(address, network, program_id):
         "params": [
             address,
             {"programId": program_id},
-            {"encoding": "jsonParsed"}
+            {"encoding": "jsonParsed", "commitment": "confirmed"}
         ]
     }
     retry_after = 1
@@ -82,7 +82,7 @@ async def get_account_info(address, network):
         "method": "getAccountInfo",
         "params": [
             address,
-            {"encoding": "base64"}
+            {"encoding": "base64", "commitment": "confirmed"}
         ]
     }
     async with httpx.AsyncClient() as client:
@@ -231,65 +231,77 @@ async def get_sol_spl_balance(address: str, networks: list) -> list:
                 print(f'***** spl_balances: {spl_balances}')
 
                 for mint, data in spl_balances.items():
-                    print(f"\n    ({mint}): {data['amount']} (Owner: {data['owner']})")
-                    if mint:
-                        token_2022_program_id_metadata = None
-                        token_metaplex_metadata = None
-                        token_data = {}
-                        if program_id == TOKEN_2022_PROGRAM_ID:
-                            response_account_info = await get_account_info(mint, network)
-                            print(f'response_account_info:{response_account_info}')
-                            if response_account_info and ('data' in response_account_info):
-                                decode_metadata_bytes = decode_metadata(response_account_info['data'])
-                                if decode_metadata_bytes:
-                                    token_2022_program_id_metadata = parse_metadata_2022_program_id(decode_metadata_bytes)
-                                    print(f'Token metadata (TOKEN_2022_PROGRAM_ID): {token_2022_program_id_metadata}')
+                    try:
+                        print(f"\n    ({mint}): {data['amount']} (Owner: {data['owner']})")
+                        if mint:
+                            token_2022_program_id_metadata = None
+                            token_metaplex_metadata = None
+                            token_data = {}
+                            if program_id == TOKEN_2022_PROGRAM_ID:
+                                response_account_info = await get_account_info(mint, network)
+                                print(f'response_account_info:{response_account_info}')
+                                if response_account_info and ('data' in response_account_info):
+                                    decode_metadata_bytes = decode_metadata(response_account_info['data'])
+                                    if decode_metadata_bytes:
+                                        token_2022_program_id_metadata = parse_metadata_2022_program_id(decode_metadata_bytes)
+                                        print(f'Token metadata (TOKEN_2022_PROGRAM_ID): {token_2022_program_id_metadata}')
 
-                        metadata_pda_address = get_metadata_pda(mint_address=mint)
-                        print(f'    Metadata PDA address: {metadata_pda_address}')
-                        if metadata_pda_address:
-                            response_pda_account_info = await get_account_info(metadata_pda_address, network)
-                            if response_pda_account_info and ('data' in response_pda_account_info):
-                                decode_metadata_bytes = decode_metadata(response_pda_account_info['data'])
-                                token_metaplex_metadata = parse_metadata_metaplex(decode_metadata_bytes)
-                                print(f'Token metadata (TOKEN_PROGRAM_ID - METAPLEX): {token_metaplex_metadata}')
+                            metadata_pda_address = get_metadata_pda(mint_address=mint)
+                            print(f'    Metadata PDA address: {metadata_pda_address}')
+                            if metadata_pda_address:
+                                response_pda_account_info = await get_account_info(metadata_pda_address, network)
+                                if response_pda_account_info and ('data' in response_pda_account_info):
+                                    decode_metadata_bytes = decode_metadata(response_pda_account_info['data'])
+                                    token_metaplex_metadata = parse_metadata_metaplex(decode_metadata_bytes)
+                                    print(f'Token metadata (TOKEN_PROGRAM_ID - METAPLEX): {token_metaplex_metadata}')
 
-                        token_data['program_id'] = program_id
-                        token_data['mint'] = mint
-                        token_data['amount'] = data['amount']
-                        token_data['owner'] = data['owner']
-                        token_data['decimals'] = data['decimals']
+                            token_data['program_id'] = program_id
+                            token_data['mint'] = mint
+                            token_data['amount'] = data['amount']
+                            token_data['owner'] = data['owner']
+                            token_data['decimals'] = data['decimals']
 
-                        transfer_cost = await calculate_total_transfer_cost(
-                            mint_pubkey=PublicKey(mint),
-                            network=network,
-                        )
-                        token_data['transfer_cost'] = transfer_cost
+                            transfer_cost = await calculate_total_transfer_cost(
+                                mint_pubkey=PublicKey(mint),
+                                network=network,
+                            )
+                            token_data['transfer_cost'] = transfer_cost
 
-                        if token_2022_program_id_metadata:
-                            token_data['name_2022'] = token_2022_program_id_metadata['name']
-                            token_data['symbol_2022'] = token_2022_program_id_metadata['symbol']
-                            token_data['uri_2022'] = token_2022_program_id_metadata['uri']
-                            token_data['update_authority_2022'] = token_2022_program_id_metadata['update_authority']
-                            token_data['error'] = token_2022_program_id_metadata['error']
+                            if token_2022_program_id_metadata:
+                                token_data['name_2022'] = token_2022_program_id_metadata['name']
+                                token_data['symbol_2022'] = token_2022_program_id_metadata['symbol']
+                                token_data['uri_2022'] = token_2022_program_id_metadata['uri']
+                                token_data['update_authority_2022'] = token_2022_program_id_metadata['update_authority']
+                                token_data['error'] = token_2022_program_id_metadata['error']
 
-                        if token_metaplex_metadata:
-                            token_data['name_metaplex'] = token_metaplex_metadata['name']
-                            token_data['symbol_metaplex'] = token_metaplex_metadata['symbol']
-                            token_data['uri_metaplex'] = token_metaplex_metadata['uri']
-                            token_data['update_authority_metaplex'] = token_metaplex_metadata['update_authority']
-                            token_data['metadata_pda_address'] = metadata_pda_address
-                            token_data['error'] = token_metaplex_metadata['error']
+                            if token_metaplex_metadata:
+                                token_data['name_metaplex'] = token_metaplex_metadata['name']
+                                token_data['symbol_metaplex'] = token_metaplex_metadata['symbol']
+                                token_data['uri_metaplex'] = token_metaplex_metadata['uri']
+                                token_data['update_authority_metaplex'] = token_metaplex_metadata['update_authority']
+                                token_data['metadata_pda_address'] = metadata_pda_address
+                                token_data['error'] = token_metaplex_metadata['error']
 
-                        if 'uri_2022' in token_data and token_data['uri_2022']:
-                            token_data['metadata_from_uri'] = await get_spl_token_data_from_uri(uri=token_data['uri_2022'])
-                        elif 'uri_metaplex' in token_data and token_data['uri_metaplex']:
-                            token_data['metadata_from_uri'] = await get_spl_token_data_from_uri(uri=token_data['uri_metaplex'])
+                            if 'uri_2022' in token_data and token_data['uri_2022']:
+                                token_data['metadata_from_uri'] = await get_spl_token_data_from_uri(uri=token_data['uri_2022'])
+                            elif 'uri_metaplex' in token_data and token_data['uri_metaplex']:
+                                token_data['metadata_from_uri'] = await get_spl_token_data_from_uri(uri=token_data['uri_metaplex'])
 
-                        if 'metadata_from_uri' in token_data and token_data['metadata_from_uri']:
-                            if 'image' in token_data['metadata_from_uri'] and token_data['metadata_from_uri']['image']:
-                                token_data['logo'] = await get_spl_token_image(token_data['metadata_from_uri']['image'])
+                            if 'metadata_from_uri' in token_data and token_data['metadata_from_uri']:
+                                if 'image' in token_data['metadata_from_uri'] and token_data['metadata_from_uri']['image']:
+                                    token_data['logo'] = await get_spl_token_image(token_data['metadata_from_uri']['image'])
 
+                            network_result['spl'].append(token_data)
+                    except Exception as token_er:
+                        print(f'Error processing token {mint}: {token_er}. Skipping this token.')
+                        token_data = {
+                            'program_id': program_id,
+                            'mint': mint,
+                            'amount': data['amount'],
+                            'owner': data['owner'],
+                            'decimals': data['decimals'],
+                            'error': str(token_er),
+                        }
                         network_result['spl'].append(token_data)
             else:
                 print(f"Ошибка при получении SPL токенов (Program ID: {program_id})")
@@ -305,13 +317,28 @@ async def calculate_total_transfer_cost(
     cu_limit: int = 80000
 ) -> dict:
     base_fee = 5000
-    rent_fee = 2039280
-    will_create_ata = True
 
     unit_price = await get_priority_fees(mint_pubkey, network)
     print(f'unit_price: {unit_price}')
 
     priority_fee_lamports = (cu_limit * unit_price) // 1_000_000
+
+    rent_fee = 0
+    will_create_ata = False
+
+    if recipient_pubkey and program_id:
+        try:
+            from .spl_token import get_associated_token_address
+            recipient_ata = get_associated_token_address(owner=recipient_pubkey, mint=mint_pubkey, token_program_id=program_id)
+            ata_info = await get_account_info(f"{recipient_ata}", network)
+            if ata_info is None or (isinstance(ata_info, dict) and ata_info.get('data') is None):
+                rent_fee = 2039280
+                will_create_ata = True
+        except Exception as er:
+            print(f'calculate_total_transfer_cost >> ATA check failed, assuming rent needed: {er}')
+            rent_fee = 2039280
+            will_create_ata = True
+
     total_lamports = base_fee + rent_fee + priority_fee_lamports
     total_sol = total_lamports / 1_000_000_000
 

@@ -1,18 +1,65 @@
 from datetime import datetime
+import asyncio
 import time
+import random
 import flet
 import base64
 import json
+import io
+import qrcode
+from decimal import Decimal, ROUND_HALF_UP
 
 from solana.create_wallet import create_solana_wallet
 from solana.balance import get_sol_spl_balance, get_sol_balance
 from solana.transfer_sol import transfer_sol_token, get_min_sol_balance
 # from solana.transfer_spl import transfer_spl_token
 from solana.spl_token import request_airdrop, transfer_spl_token
+from solana.swap import get_quote as jup_get_quote, swap as jup_swap
 from solana.validators import is_valid_amount, is_valid_wallet_address, is_valid_private_key, is_valid_wallet_seed_phrase
 from solana.transaction_history import get_transaction_history
+from solana.security import (
+    WALLET_ENCRYPTED_FIELD,
+    WATCH_ONLY_FIELD,
+    SECRET_FIELDS,
+    MIN_PIN_LENGTH,
+    make_salt,
+    derive_key,
+    make_verifier,
+    verify_pin,
+    validate_pin,
+    encode_salt,
+    decode_salt,
+    encrypt_wallet_secrets,
+    decrypt_wallet_secrets,
+    get_secret,
+)
+
+
+def generate_qr_base64(data: str, box_size: int = 8, border: int = 2) -> str:
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=box_size,
+        border=border,
+    )
+    qr.add_data(data)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode()
 
 # LAMPORT_TO_SOL_RATIO = 10 ** 9
+
+# Mainnet token registry for the swap screen (symbol -> (mint, decimals)).
+# Jupiter's hosted API serves mainnet-beta only, so swaps are mainnet-only.
+SWAP_TOKENS = {
+    "SOL": ("So11111111111111111111111111111111111111112", 9),
+    "USDC": ("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", 6),
+    "USDT": ("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", 6),
+    "JUP": ("JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", 6),
+}
+MAINNET_RPC = "https://api.mainnet-beta.solana.com"
 
 async def main(page: flet.Page):
     page.scroll = flet.ScrollMode.AUTO
@@ -32,6 +79,235 @@ async def main(page: flet.Page):
     else:
         page.theme_mode = flet.ThemeMode.LIGHT
         await page.shared_preferences.set("theme_mode", "LIGHT")
+
+    # ---------------------------------------------------------------------------
+    # Security: PIN gate, encrypted secrets, auto-lock on inactivity.
+    # ---------------------------------------------------------------------------
+    PIN_SALT_KEY = "security.pin_salt"
+    PIN_VERIFIER_KEY = "security.pin_verifier"
+    AUTO_LOCK_SECONDS = 300  # lock after 5 minutes of inactivity
+
+    # Session state held only in memory while the app is unlocked.
+    session = {
+        "unlocked": False,        # is the session key currently available?
+        "key": None,              # Fernet key derived from the PIN (in-memory only)
+        "last_activity": time.time(),
+        "lock_dialog": None,      # currently-shown lock/setup dialog (if any)
+    }
+
+    def reset_activity():
+        """Mark now as the most recent user activity (postpones auto-lock)."""
+        session["last_activity"] = time.time()
+
+    async def load_pin():
+        """Return (salt_bytes, verifier_str) or (None, None) if no PIN is set."""
+        if not await page.shared_preferences.contains_key(PIN_SALT_KEY):
+            return None, None
+        salt_str = await page.shared_preferences.get(PIN_SALT_KEY)
+        verifier = await page.shared_preferences.get(PIN_VERIFIER_KEY)
+        if not salt_str or not verifier:
+            return None, None
+        try:
+            return decode_salt(salt_str), verifier
+        except Exception:
+            return None, None
+
+    async def save_pin(salt: bytes, verifier: str):
+        await page.shared_preferences.set(PIN_SALT_KEY, encode_salt(salt))
+        await page.shared_preferences.set(PIN_VERIFIER_KEY, verifier)
+
+    async def migrate_plaintext_wallets(key: bytes):
+        """Encrypt the secrets of every legacy (plaintext) wallet record.
+
+        Called once after a PIN is first set up.  Already-encrypted records
+        and watch-only wallets (empty secrets) are handled gracefully.
+        """
+        keys = await page.shared_preferences.get_keys("wallet.")
+        for k in keys:
+            val = await page.shared_preferences.get(k)
+            if not isinstance(val, str):
+                continue
+            try:
+                wallet = json.loads(val)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(wallet, dict):
+                continue
+            if wallet.get(WALLET_ENCRYPTED_FIELD):
+                continue  # already encrypted
+            encrypted = encrypt_wallet_secrets(wallet, key)
+            await page.shared_preferences.set(k, json.dumps(encrypted))
+
+    def is_unlocked() -> bool:
+        return session["unlocked"] and session["key"] is not None
+
+    def encrypt_for_storage(value: dict) -> dict:
+        """Encrypt a wallet record's secrets before persistence.
+
+        When the session is unlocked (a PIN is active), secrets are encrypted
+        with the in-memory key.  Otherwise the record is stored in plaintext
+        and migrated later once a PIN is established.
+        """
+        if is_unlocked():
+            return encrypt_wallet_secrets(value, session["key"])
+        return value
+
+    def get_wallet_private_key(wallet: dict) -> str:
+        """Plaintext private key hex for a wallet ('' if watch-only / locked)."""
+        if not is_unlocked():
+            return ""
+        return get_secret(wallet, "private_key_hex", session["key"])
+
+    def has_wallet_private_key(wallet: dict) -> bool:
+        return bool(get_wallet_private_key(wallet))
+
+    def decrypt_for_display(wallet: dict) -> dict:
+        """Wallet dict with secrets decrypted (for the Wallet Info dialog)."""
+        if not is_unlocked():
+            return wallet
+        return decrypt_wallet_secrets(wallet, session["key"])
+
+    async def lock_app():
+        """Drop the in-memory key and require the PIN again."""
+        session["unlocked"] = False
+        session["key"] = None
+        await refresh_lock_state()
+
+    def close_lock_dialog():
+        if session["lock_dialog"] is not None:
+            session["lock_dialog"].open = False
+            session["lock_dialog"] = None
+            page.update()
+
+    async def show_setup_dialog():
+        tf1 = flet.TextField(
+            label=f"Create a PIN ({MIN_PIN_LENGTH}+ digits)", password=True,
+            can_reveal_password=True, keyboard_type=flet.KeyboardType.NUMBER, autofocus=True,
+        )
+        tf2 = flet.TextField(
+            label="Confirm PIN", password=True, can_reveal_password=True,
+            keyboard_type=flet.KeyboardType.NUMBER,
+        )
+        err = flet.Text("", color="red")
+
+        async def confirm(ev):
+            p1, p2 = tf1.value or "", tf2.value or ""
+            if not validate_pin(p1):
+                err.value = f"PIN must be {MIN_PIN_LENGTH}+ digits."
+                page.update(); return
+            if p1 != p2:
+                err.value = "PINs do not match."
+                page.update(); return
+            salt = make_salt()
+            key = derive_key(p1, salt)
+            verifier = make_verifier(key)
+            await save_pin(salt, verifier)
+            await migrate_plaintext_wallets(key)
+            session["unlocked"] = True
+            session["key"] = key
+            reset_activity()
+            close_lock_dialog()
+
+        dlg = flet.AlertDialog(
+            modal=True,
+            title=flet.Text("Set up a PIN"),
+            content=flet.Column(
+                [
+                    flet.Text("This PIN encrypts your private keys at rest and unlocks the app. Do not forget it: lost PINs cannot be recovered.", size=12),
+                    tf1, tf2, err,
+                ],
+                tight=True,
+            ),
+            actions=[flet.ElevatedButton("Set PIN", on_click=confirm)],
+            actions_alignment=flet.MainAxisAlignment.END,
+        )
+        session["lock_dialog"] = dlg
+        page.show_dialog(dlg)
+
+    async def show_unlock_dialog():
+        tf = flet.TextField(
+            label="Enter PIN", password=True, can_reveal_password=True,
+            keyboard_type=flet.KeyboardType.NUMBER, autofocus=True,
+        )
+        err = flet.Text("", color="red")
+
+        async def do_unlock(ev):
+            salt, verifier = await load_pin()
+            pin = tf.value or ""
+            if salt is not None and verify_pin(pin, salt, verifier):
+                session["unlocked"] = True
+                session["key"] = derive_key(pin, salt)
+                # Defensive: encrypt any wallet that slipped through while locked.
+                await migrate_plaintext_wallets(session["key"])
+                reset_activity()
+                tf.value = ""
+                err.value = ""
+                close_lock_dialog()
+            else:
+                err.value = "Incorrect PIN."
+                page.update()
+
+        async def forgot_pin(ev):
+            # Losing the PIN means the encrypted secrets are unrecoverable.
+            # Offer a destructive reset that wipes the whole wallet store.
+            async def do_wipe(inner):
+                await clear_client_storage()
+                session["unlocked"] = False
+                session["key"] = None
+                session["lock_dialog"] = None
+                confirm_dlg.open = False
+                page.update()
+                await refresh_lock_state()  # PIN wiped -> shows the setup dialog
+
+            async def cancel(inner):
+                confirm_dlg.open = False
+                page.update()
+                await show_unlock_dialog()  # re-show the unlock dialog
+
+            confirm_dlg = flet.AlertDialog(
+                modal=True,
+                title=flet.Text("Reset everything?"),
+                content=flet.Text("This will permanently delete the PIN and ALL stored wallets (their encrypted keys become unrecoverable). Only continue if you have your seed phrases backed up."),
+                actions=[
+                    flet.TextButton("Cancel", on_click=cancel),
+                    flet.ElevatedButton("Reset & Wipe", on_click=do_wipe, icon=flet.Icons.DELETE_FOREVER),
+                ],
+                actions_alignment=flet.MainAxisAlignment.END,
+            )
+            page.show_dialog(confirm_dlg)
+
+        dlg = flet.AlertDialog(
+            modal=True,
+            title=flet.Text("Enter PIN"),
+            content=flet.Column([tf, err], tight=True),
+            actions=[
+                flet.ElevatedButton("Unlock", on_click=do_unlock),
+                flet.TextButton("Forgot PIN?", on_click=forgot_pin),
+            ],
+            actions_alignment=flet.MainAxisAlignment.END,
+        )
+        tf.on_submit = do_unlock
+        session["lock_dialog"] = dlg
+        page.show_dialog(dlg)
+
+    async def refresh_lock_state():
+        """Show the setup dialog (first run) or unlock dialog (subsequent runs)."""
+        salt, _ = await load_pin()
+        if salt is None:
+            await show_setup_dialog()
+        else:
+            await show_unlock_dialog()
+
+    async def auto_lock_watcher():
+        """Periodically lock the app after AUTO_LOCK_SECONDS of inactivity."""
+        while True:
+            await asyncio.sleep(10)
+            if (
+                session["lock_dialog"] is None
+                and is_unlocked()
+                and (time.time() - session["last_activity"]) > AUTO_LOCK_SECONDS
+            ):
+                await lock_app()
 
     input_wallet_name = flet.TextField(label="Wallet Name", min_lines=1, max_lines=1, max_length=50)
     input_wallet_description = flet.TextField(label="Wallet description", min_lines=2, max_lines=5, max_length=200)
@@ -132,6 +408,11 @@ async def main(page: flet.Page):
                                         flet.TextSpan(f'{wallet['address_base58']}', flet.TextStyle(size=12, weight=flet.FontWeight.BOLD,)),
                                     ]
                                 ),
+                                flet.Text(
+                                    "Watch-only (no private key)",
+                                    size=11, color="orange", weight=flet.FontWeight.BOLD,
+                                    visible=bool(wallet.get(WATCH_ONLY_FIELD)),
+                                ),
                                 flet.Divider(thickness=1),
                                 flet.Row(
                                     [
@@ -181,24 +462,40 @@ async def main(page: flet.Page):
                 await page.push_route("/")
 
         async def copy_data(e):
-            copy_val = {k: v for k, v in wallet.items() if k != 'storage_key'}
+            copy_src = decrypt_for_display(wallet)
+            copy_val = {k: v for k, v in copy_src.items() if k != 'storage_key'}
             await page.clipboard.set(json.dumps(copy_val, indent=2))
 
         tf_name = flet.TextField(label="Name", value=wallet.get('name', ''))
         tf_desc = flet.TextField(label="Description", value=wallet.get('description', ''), multiline=True)
 
+        # Decrypt secrets on demand (records are stored encrypted once a PIN exists).
+        w_dec = decrypt_for_display(wallet)
+        watch_only_tag = "  (watch-only)" if wallet.get(WATCH_ONLY_FIELD) else ""
         info_text = f"Address: {wallet.get('address_base58')}\n" \
-                    f"Created: {wallet.get('created')}\n" \
-                    f"Private Key: {wallet.get('private_key_hex')}\n" \
-                    f"Public Key: {wallet.get('public_key_hex')}\n" \
-                    f"Words: {wallet.get('words')}\n" \
-                    f"Secret Key (base58): {wallet.get('secret_key_base58')}"
+                    f"Created: {wallet.get('created')}{watch_only_tag}\n" \
+                    f"Private Key: {w_dec.get('private_key_hex')}\n" \
+                    f"Public Key: {w_dec.get('public_key_hex')}\n" \
+                    f"Words: {w_dec.get('words')}\n" \
+                    f"Secret Key (base58): {w_dec.get('secret_key_base58')}"
 
         dlg_info = flet.AlertDialog(
             title=flet.Text("Wallet Info"),
             content=flet.Column([
                 tf_name,
                 tf_desc,
+                flet.Row(
+                    [
+                        flet.Image(
+                            src=await asyncio.to_thread(generate_qr_base64, wallet.get('address_base58', '')),
+                            width=140,
+                            height=140,
+                            fit=flet.BoxFit.CONTAIN,
+                            border_radius=flet.border_radius.all(8),
+                        ),
+                    ],
+                    alignment=flet.MainAxisAlignment.CENTER,
+                ),
                 flet.Text(info_text, selectable=True, size=12),
                 flet.ElevatedButton("Copy All Data", on_click=copy_data, icon=flet.Icons.COPY)
             ], scroll=flet.ScrollMode.AUTO, height=400),
@@ -210,9 +507,40 @@ async def main(page: flet.Page):
         )
         page.show_dialog(dlg_info)
 
+    async def show_qr_click(e):
+        address = e.control.data
+
+        def close_qr_dlg(ev):
+            dlg_qr.open = False
+            page.update()
+
+        qr_b64 = await asyncio.to_thread(generate_qr_base64, address)
+        dlg_qr = flet.AlertDialog(
+            title=flet.Text("Receive SOL", text_align=flet.TextAlign.CENTER),
+            content=flet.Column(
+                [
+                    flet.Image(
+                        src=qr_b64,
+                        width=280,
+                        height=280,
+                        fit=flet.BoxFit.CONTAIN,
+                    ),
+                    flet.Text(address, selectable=True, size=11, text_align=flet.TextAlign.CENTER),
+                ],
+                horizontal_alignment=flet.CrossAxisAlignment.CENTER,
+                tight=True,
+            ),
+            actions=[
+                flet.TextButton("Close", on_click=close_qr_dlg),
+            ],
+            actions_alignment=flet.MainAxisAlignment.CENTER,
+        )
+        page.show_dialog(dlg_qr)
+
     async def go_to_address_page(e):
         print(f'****** go_to_address_page e.control.data: {e.control.data}')
         wallet = e.control.data
+        qr_b64 = await asyncio.to_thread(generate_qr_base64, wallet["address_base58"])
         el_address_page.controls = [
             flet.Row(
                 [
@@ -282,6 +610,34 @@ async def main(page: flet.Page):
                         selectable=True,
                     ),
                 ]
+            ),
+            flet.Row(
+                [
+                    flet.Image(
+                        src=qr_b64,
+                        width=160,
+                        height=160,
+                        fit=flet.BoxFit.CONTAIN,
+                        border_radius=flet.border_radius.all(8),
+                    ),
+                ],
+                alignment=flet.MainAxisAlignment.CENTER,
+            ),
+            flet.Row(
+                [
+                    flet.ElevatedButton(
+                        content=flet.Text("Show QR Code"),
+                        icon=flet.Icons.QR_CODE_2,
+                        on_click=show_qr_click,
+                        data=wallet["address_base58"],
+                    ),
+                    flet.IconButton(
+                        icon=flet.Icons.CONTENT_COPY,
+                        tooltip="Copy Address",
+                        on_click=lambda e: page.clipboard.set(wallet["address_base58"]),
+                    ),
+                ],
+                alignment=flet.MainAxisAlignment.CENTER,
             ),
             flet.Divider(thickness=2),
             flet.Row([flet.Text("Solana Networks:", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD),]),
@@ -627,6 +983,17 @@ async def main(page: flet.Page):
                                     },
                                     disabled=False if r['sol'] else True,
                                 ),
+                                flet.ElevatedButton(
+                                    content=flet.Text("Swap"),
+                                    on_click=go_to_swap_page_button_click,
+                                    data={
+                                        'wallet_address': wallet['address_base58'],
+                                        'network': r['network'],
+                                        'sol_amount': r['sol'],
+                                        'wallet_data': wallet,
+                                    },
+                                    disabled=(r['network'] != MAINNET_RPC) or (not r['sol']),
+                                ),
                                 flet.Text(
                                     value='',
                                     spans=[
@@ -653,16 +1020,176 @@ async def main(page: flet.Page):
             )
         except Exception as er:
             print(f'Error get_balance_button_click: {er}')
+            el_token_balance_data.controls.clear()
+            el_token_balance_data.controls.append(
+                flet.Text(f'Error: {er}', color=flet.colors.RED, size=14)
+            )
+            try:
+                e.control.disabled = False
+            except Exception:
+                pass
             page.show_dialog(
                 flet.AlertDialog(
                     title=flet.Text("Error get_balance_button_click!"),
                 )
             )
         finally:
+            try:
+                e.control.disabled = False
+            except Exception:
+                pass
             page.update()
 
     el_token_page = flet.Column()
     el_spl_token_page = flet.Column()
+    el_swap_page = flet.Column()
+
+    async def go_to_swap_page_button_click(e):
+        data = e.control.data
+        if data['network'] != MAINNET_RPC:
+            page.show_dialog(
+                flet.AlertDialog(title=flet.Text("Swaps are only supported on mainnet-beta."))
+            )
+            return
+        if not has_wallet_private_key(data['wallet_data']):
+            page.show_dialog(
+                flet.AlertDialog(title=flet.Text("Swap needs the wallet's private key. Recover the wallet with its secret to enable swaps."))
+            )
+            return
+        dd_in = flet.Dropdown(
+            label="Input token", value="SOL", width=200,
+            options=[flet.dropdown.Option(sym) for sym in SWAP_TOKENS],
+        )
+        dd_out = flet.Dropdown(
+            label="Output token", value="USDC", width=200,
+            options=[flet.dropdown.Option(sym) for sym in SWAP_TOKENS],
+        )
+        tf_amount = flet.TextField(label="Amount", width=200, max_length=30)
+        tf_slippage = flet.TextField(label="Slippage %", value="1.0", width=120, max_length=6)
+        txt_quote = flet.Text(value="Enter an amount and press Get Quote.", selectable=True)
+        # store the last quote + the exact inputs it was computed for
+        await_holder = {"quote": None, "in_raw": None, "in_sym": None, "out_sym": None, "amount_str": None, "slippage_bps": None}
+
+        def _parse_slippage_bps() -> int:
+            try:
+                pct = float((tf_slippage.value or "1").strip() or "1")
+            except ValueError:
+                pct = 1.0
+            return max(1, int(round(pct * 100)))
+
+        async def get_quote_button_click(ev):
+            print(f"[SWAP] get_quote clicked: in={dd_in.value} out={dd_out.value} amount={tf_amount.value}")
+            try:
+                if dd_in.value == dd_out.value:
+                    txt_quote.value = "Input and output tokens must differ."
+                    page.update(); return
+                amount_str = (tf_amount.value or "").strip()
+                if not is_valid_amount(amount_str):
+                    txt_quote.value = "Invalid amount."; page.update(); return
+                decimals = SWAP_TOKENS[dd_in.value][1]
+                in_raw = int((Decimal(amount_str) * (Decimal(10) ** decimals)).to_integral_value(rounding=ROUND_HALF_UP))
+                if in_raw <= 0:
+                    txt_quote.value = "Amount must be greater than 0."; page.update(); return
+                slippage_bps = _parse_slippage_bps()
+                in_mint = SWAP_TOKENS[dd_in.value][0]
+                out_mint = SWAP_TOKENS[dd_out.value][0]
+                txt_quote.value = "Fetching quote..."
+                page.update()
+                q = await jup_get_quote(in_mint, out_mint, in_raw, slippage_bps=slippage_bps)
+                print(f"[SWAP] quote ok: outAmount={q.get('outAmount')} threshold={q.get('otherAmountThreshold')}")
+                out_decimals = SWAP_TOKENS[dd_out.value][1]
+                out_ui = int(q["outAmount"]) / (10 ** out_decimals)
+                min_out = int(q["otherAmountThreshold"]) / (10 ** out_decimals)
+                txt_quote.value = (
+                    f"{amount_str} {dd_in.value} -> {out_ui:.6f} {dd_out.value}\n"
+                    f"Min received (with slippage): {min_out:.6f} {dd_out.value}\n"
+                    f"Price impact: {float(q.get('priceImpactPct', 0)) * 100:.3f}%"
+                )
+                await_holder["quote"] = q
+                await_holder["in_raw"] = in_raw
+                await_holder["in_sym"] = dd_in.value
+                await_holder["out_sym"] = dd_out.value
+                await_holder["amount_str"] = amount_str
+                await_holder["slippage_bps"] = slippage_bps
+                page.update()
+            except Exception as er:
+                import traceback
+                print(f"[SWAP] quote ERROR: {er}\n{traceback.format_exc()}")
+                txt_quote.value = f"Quote error: {er}"
+                page.update()
+
+        async def swap_button_click(ev):
+            print(f"[SWAP] swap clicked: in={dd_in.value} out={dd_out.value} quote_cached={await_holder['quote'] is not None}")
+            try:
+                if await_holder["quote"] is None:
+                    txt_quote.value = "Press Get Quote first."; page.update(); return
+                if dd_in.value == dd_out.value:
+                    txt_quote.value = "Input and output tokens must differ."; page.update(); return
+                # Refuse to swap if the inputs changed since the quote was taken:
+                # the cached in_raw is scaled to the quoted token's decimals and
+                # reusing it with a different token would swap the wrong amount.
+                changed = (
+                    dd_in.value != await_holder["in_sym"]
+                    or dd_out.value != await_holder["out_sym"]
+                    or (tf_amount.value or "").strip() != await_holder["amount_str"]
+                    or _parse_slippage_bps() != await_holder["slippage_bps"]
+                )
+                if changed:
+                    txt_quote.value = "Inputs changed since the quote. Press Get Quote again, then Swap."; page.update(); return
+                ev.control.disabled = True
+                txt_quote.value = "Swapping... please wait"
+                page.update()
+                in_mint = SWAP_TOKENS[dd_in.value][0]
+                out_mint = SWAP_TOKENS[dd_out.value][0]
+                res = await jup_swap(
+                    input_mint=in_mint,
+                    output_mint=out_mint,
+                    amount=await_holder["in_raw"],
+                    signer_address=data['wallet_data']['address_base58'],
+                    private_key_hex=get_wallet_private_key(data['wallet_data']),
+                    slippage_bps=await_holder["slippage_bps"],
+                    network=MAINNET_RPC,
+                )
+                print(f"[SWAP] swap result: sig={res['signature']} outAmount={res.get('outAmount')}")
+                out_decimals = SWAP_TOKENS[dd_out.value][1]
+                out_ui = int(res["outAmount"]) / (10 ** out_decimals)
+                conf = res.get("confirmation", {}).get("result", {}).get("value", [{}])[0]
+                status = conf.get("confirmationStatus") if conf else "unknown"
+                err = conf.get("err")
+                if err:
+                    txt_quote.value = f"Swap FAILED: {err}\nsignature: {res['signature']}"
+                else:
+                    txt_quote.value = (
+                        f"Swap SUCCESS ({status})!\n"
+                        f"Received ~{out_ui:.6f} {dd_out.value}\n"
+                        f"signature: {res['signature']}"
+                    )
+            except Exception as er:
+                import traceback
+                print(f"[SWAP] swap ERROR: {er}\n{traceback.format_exc()}")
+                txt_quote.value = f"Swap error: {er}"
+            finally:
+                ev.control.disabled = False
+                page.update()
+
+        el_swap_page.controls.clear()
+        el_swap_page.controls.extend([
+            flet.Row([flet.Text(
+                value='',
+                spans=[
+                    flet.TextSpan('Wallet: ', flet.TextStyle(size=16)),
+                    flet.TextSpan(f"{data['wallet_data']['address_base58']}", flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
+                ]
+            )]),
+            flet.Row([dd_in, dd_out]),
+            flet.Row([tf_amount, tf_slippage]),
+            flet.Row([
+                flet.ElevatedButton("Get Quote", on_click=get_quote_button_click),
+                flet.ElevatedButton("Swap", on_click=swap_button_click),
+            ]),
+            flet.Row([txt_quote], wrap=True),
+        ])
+        await page.push_route("swap-page")
 
     async def spl_token_arrow_drop_down_button_click(e):
         try:
@@ -858,7 +1385,7 @@ async def main(page: flet.Page):
                 flet.Column(),
             ]
         )
-        if not data['wallet_data']['private_key_hex']:
+        if not has_wallet_private_key(data['wallet_data']):
              el_spl_token_page.controls.insert(
                 6,
                 flet.Row(
@@ -880,7 +1407,7 @@ async def main(page: flet.Page):
         page.update()
 
         alert_dialog_text = ''
-        private_key_hex = data['wallet_data']['private_key_hex']
+        private_key_hex = get_wallet_private_key(data['wallet_data'])
 
         if not private_key_hex:
             input_secret = e.control.parent.parent.controls[6].controls[0].value.strip()
@@ -1012,7 +1539,7 @@ async def main(page: flet.Page):
                 flet.Column(),
             ]
         )
-        if not data['wallet_data']['private_key_hex']:
+        if not has_wallet_private_key(data['wallet_data']):
             el_token_page.controls.insert(
                 5,
                 flet.Row(
@@ -1039,14 +1566,16 @@ async def main(page: flet.Page):
         transfer_sol_amount = ''
         recipient_address = ''
 
-        if not data['wallet_data']['private_key_hex']:
+        private_key_hex = get_wallet_private_key(data['wallet_data'])
+
+        if not private_key_hex:
             input_secret = e.control.parent.parent.controls[5].controls[0].value.strip()
             if is_valid_wallet_seed_phrase(input_secret):
                 # преобразовать секретные слова 12/24 в приватный ключ в hex формате
                 for attempt in range(10):
-                    words, wallet_address_base58, secret_key_base58, private_key_hex, public_key_hex, error = create_solana_wallet(secret=input_secret)
+                    words, wallet_address_base58, secret_key_base58, new_private_key_hex, public_key_hex, error = create_solana_wallet(secret=input_secret)
                     if wallet_address_base58 == data['wallet_data']['address_base58']:
-                        data['wallet_data']['private_key_hex'] = private_key_hex
+                        private_key_hex = new_private_key_hex
                         break
                     elif error:
                         alert_dialog_text = f"Error after: {attempt} attempts to get private key from secret words: {input_secret}! Error Msg: {error}"
@@ -1054,11 +1583,11 @@ async def main(page: flet.Page):
                     alert_dialog_text = f'Failed to get private key after: {attempt} attempts from secret words: {input_secret}'
             elif is_valid_private_key(input_secret):
                 if len(input_secret) == 64:
-                    data['wallet_data']['private_key_hex'] = input_secret
+                    private_key_hex = input_secret
             else:
                 alert_dialog_text = "Error Secret!"
 
-        if data['wallet_data']['private_key_hex']:
+        if private_key_hex:
             recipient_address = e.control.parent.parent.controls[4].controls[0].value
             # print(f'**** recipient: {recipient_address}')
             if is_valid_wallet_address(recipient_address):
@@ -1076,7 +1605,7 @@ async def main(page: flet.Page):
                     if (transfer_sol_amount > 0) and (transfer_sol_amount < data['sol_amount'] - min_sol_balance):
                         result = await transfer_sol_token(
                             sender_address=data['wallet_data']['address_base58'],
-                            sender_private_key=data['wallet_data']['private_key_hex'],
+                            sender_private_key=private_key_hex,
                             recipient_address=recipient_address,
                             amount=transfer_sol_amount,
                             network=data['network']
@@ -1260,7 +1789,7 @@ async def main(page: flet.Page):
         print(f'generate_new_wallet_storage >> key: {key}')
         print(f'generate_new_wallet_storage >> value: {value}')
 
-        await page.shared_preferences.set(key, json.dumps(value))
+        await page.shared_preferences.set(key, json.dumps(encrypt_for_storage(value)))
 
         txt_error.value = ''
         txt_wallet_created.value = ''
@@ -1296,7 +1825,7 @@ async def main(page: flet.Page):
         print(f'recover_wallet_storage >> key: {key}')
         print(f'recover_wallet_storage >> value: {value}')
 
-        await page.shared_preferences.set(key, json.dumps(value))
+        await page.shared_preferences.set(key, json.dumps(encrypt_for_storage(value)))
 
         txt_recover_error.value = ''
         txt_recover_wallet_created.value = ''
@@ -1329,11 +1858,12 @@ async def main(page: flet.Page):
         value['public_key_hex'] = ''
         value['words'] = ''
         value['secret_key_base58'] = ''
+        value[WATCH_ONLY_FIELD] = True
 
         print(f'add_address_wallet_storage >> key: {key}')
         print(f'add_address_wallet_storage >> value: {value}')
 
-        await page.shared_preferences.set(key, json.dumps(value))
+        await page.shared_preferences.set(key, json.dumps(encrypt_for_storage(value)))
 
         txt_add_address_error.value = ''
         txt_add_address_wallet_created.value = ''
@@ -1593,18 +2123,94 @@ async def main(page: flet.Page):
         if error:
             txt_error.value = error
             create_wallet_page.controls.append(error_generate_new_solana_wallet_card)
-        else:
-            txt_wallet_created.value = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            txt_wallet_name.value = input_wallet_name.value.strip()
-            txt_wallet_description.value = input_wallet_description.value.strip()
-            txt_wallet_address.value = wallet_address_base58
-            txt_private_key.value = private_key_hex
-            txt_public_key.value = public_key_hex
-            txt_words.value = words
-            # txt_seed.value = seed_hex
-            txt_secret_key_base58.value = secret_key_base58
-            create_wallet_page.controls.append(generate_new_solana_wallet_card)
+            page.update()
+            return
+
+        txt_wallet_created.value = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        txt_wallet_name.value = input_wallet_name.value.strip()
+        txt_wallet_description.value = input_wallet_description.value.strip()
+        txt_wallet_address.value = wallet_address_base58
+        txt_private_key.value = private_key_hex
+        txt_public_key.value = public_key_hex
+        txt_words.value = words
+        # txt_seed.value = seed_hex
+        txt_secret_key_base58.value = secret_key_base58
         page.update()
+
+        # Backup verification: reveal the seed, then quiz the user on it
+        # before allowing them to see the full secret card / save it.
+        words_list = words.split()
+        reveal_dlg = None  # assigned by show_reveal(); closed over by start_quiz
+
+        async def start_quiz(ev):
+            nonlocal reveal_dlg
+            if reveal_dlg is not None:
+                reveal_dlg.open = False
+            page.update()
+
+            positions = sorted(random.sample(range(len(words_list)), min(2, len(words_list))))
+            fields = []
+            quiz_rows = [
+                flet.Text("Confirm your recovery phrase by entering the requested words.", size=12),
+            ]
+            for pos in positions:
+                tf = flet.TextField(label=f"Word #{pos + 1}", min_lines=1, max_lines=1, max_length=30)
+                fields.append((pos, tf))
+                quiz_rows.append(tf)
+            quiz_err = flet.Text("", color="red")
+
+            async def verify(inner):
+                ok = True
+                for pos, tf in fields:
+                    if (tf.value or "").strip().lower() != words_list[pos].lower():
+                        ok = False
+                if ok:
+                    quiz_dlg.open = False
+                    page.update()
+                    create_wallet_page.controls.append(generate_new_solana_wallet_card)
+                    page.update()
+                else:
+                    quiz_err.value = "One or more words are incorrect. Check your spelling and try again."
+                    page.update()
+
+            async def reveal_again(inner):
+                quiz_dlg.open = False
+                page.update()
+                await show_reveal()
+
+            quiz_dlg = flet.AlertDialog(
+                modal=True,
+                title=flet.Text("Verify your backup"),
+                content=flet.Column(quiz_rows + [quiz_err], tight=True),
+                actions=[
+                    flet.TextButton("Show words again", on_click=reveal_again),
+                    flet.ElevatedButton("Verify", on_click=verify),
+                ],
+                actions_alignment=flet.MainAxisAlignment.END,
+            )
+            page.show_dialog(quiz_dlg)
+
+        async def show_reveal():
+            nonlocal reveal_dlg
+            reveal_rows = [
+                flet.Text(
+                    "These 12 words are the ONLY way to recover this wallet. "
+                    "Write them down and store them safely. No one can recover them for you.",
+                    size=12, color="red",
+                ),
+                flet.Text(words, selectable=True, size=14, weight=flet.FontWeight.BOLD),
+                flet.Text("You will be asked to confirm them on the next screen.", size=12),
+            ]
+            reveal_dlg = flet.AlertDialog(
+                modal=True,
+                title=flet.Text("Your recovery phrase"),
+                content=flet.Column(reveal_rows, tight=True),
+                actions=[flet.ElevatedButton("I've written it down", on_click=start_quiz)],
+                actions_alignment=flet.MainAxisAlignment.END,
+            )
+            page.show_dialog(reveal_dlg)
+
+        await show_reveal()
 
     async def recover_solana_wallet_button(e):
         if recover_solana_wallet_card in recover_wallet_page.controls:
@@ -1796,6 +2402,7 @@ async def main(page: flet.Page):
     )
 
     async def route_change(route):
+        reset_activity()
         page.views.clear()
         homepage.controls[-1] = await get_wallets_cards()
         page.views.append(homepage)
@@ -1814,11 +2421,14 @@ async def main(page: flet.Page):
             page.views.append(token_page)
         elif page.route == "spl-token-page":
             page.views.append(spl_token_page)
+        elif page.route == "swap-page":
+            page.views.append(swap_page)
         # else:
         #     page.views.append(homepage)
         page.update()
 
     async def view_pop(view):
+        reset_activity()
         print(f'########### start >> page.views >> len={len(page.views)}, page.views: {page.views}')
         page.views.pop()
         print(f'########### after pop() >> page.views >> len={len(page.views)}, page.views: {page.views}')
@@ -2036,11 +2646,32 @@ async def main(page: flet.Page):
         ]
     )
 
+    swap_page = flet.View(
+        route="swap-page",
+        appbar=flet.AppBar(
+            title=flet.Text("Swap (Jupiter)"),
+            color="white",
+            bgcolor="green",
+            leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
+        ),
+        navigation_bar=navbar,
+        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
+        scroll=flet.ScrollMode.AUTO,
+        controls=[
+            flet.Text('Swap Tokens', size=30, font_family="Georgia"),
+            el_swap_page,
+        ]
+    )
+
     page.on_route_change = route_change
     page.on_view_pop = view_pop
     await route_change(None) # Manually trigger the initial UI load since push_route is ignored on identical paths
     await page.push_route(page.route)
     page.update()
+
+    # Start the inactivity auto-lock watcher and present the PIN gate.
+    asyncio.create_task(auto_lock_watcher())
+    await refresh_lock_state()
 
 
 flet.run(main)

@@ -8,7 +8,7 @@ from solana.keypair import Keypair
 from solana.publickey import PublicKey
 from solana.transaction import Transaction
 from solana.system_program import TransferParams, transfer
-from solana.commitment import COMMITMENT_RANKS, Commitment, Finalized
+from solana.commitment import COMMITMENT_RANKS, Commitment, Confirmed
 
 async def get_blockhash(network):
     blockhash = None
@@ -32,7 +32,7 @@ async def get_blockhash(network):
 
     return blockhash
 
-async def confirm_transaction(tx_sig: str, network: str, commitment: Commitment = Finalized, sleep_seconds: float = 0.5) -> Dict:
+async def confirm_transaction(tx_sig: str, network: str, commitment: Commitment = Confirmed, sleep_seconds: float = 0.5, timeout_seconds: float = 60) -> Dict:
     base58_sig = ''
     if isinstance(tx_sig, str):
         base58_sig = base58.b58encode(base58.b58decode(tx_sig.encode("ascii"))).decode("utf-8")
@@ -50,34 +50,70 @@ async def confirm_transaction(tx_sig: str, network: str, commitment: Commitment 
             {"searchTransactionHistory": False}
         ]
     }
-    timeout = time.time() + 30
+
+    deadline = time.time() + timeout_seconds
+    max_429_retries = 10
+    retry_429_count = 0
+    last_resp = None
+    last_seen_status = None
+
     async with httpx.AsyncClient() as client:
-        while time.time() < timeout:
-            print(f'*** TIME: {timeout - time.time()} sec')
-            response = await client.post(url, headers=headers, json=payload)
-            print(f'******** confirm_transaction >> resp: {response}')
-            print(f'******** confirm_transaction >> resp.json(): {response.json()}')
+        while time.time() < deadline:
+            try:
+                response = await client.post(url, headers=headers, json=payload)
+            except httpx.HTTPError as er:
+                print(f'confirm_transaction >> network error: {er}, retrying...')
+                await asyncio.sleep(min(sleep_seconds * 4, 5))
+                continue
+
+            # Public RPC rate-limit: back off and retry instead of failing.
+            if response.status_code == 429:
+                retry_429_count += 1
+                if retry_429_count > max_429_retries:
+                    raise Exception(f"Rate limited (429) after {retry_429_count} retries while confirming transaction {tx_sig}")
+                retry_after = float(response.headers.get("retry-after") or min(2 ** retry_429_count, 20))
+                print(f'confirm_transaction >> 429 Too Many Requests, backing off for {retry_after}s (attempt {retry_429_count}/{max_429_retries})')
+                await asyncio.sleep(retry_after)
+                continue
 
             resp = response.json()
             maybe_rpc_error = resp.get("error")
             if maybe_rpc_error is not None:
+                # JSON-RPC 429 is the same rate-limit encoded at the protocol level.
+                err_code = maybe_rpc_error.get("code") if isinstance(maybe_rpc_error, dict) else None
+                if err_code == 429:
+                    retry_429_count += 1
+                    if retry_429_count > max_429_retries:
+                        raise Exception(maybe_rpc_error)
+                    backoff = min(2 ** retry_429_count, 20)
+                    print(f'confirm_transaction >> RPC error 429, backing off for {backoff}s (attempt {retry_429_count}/{max_429_retries})')
+                    await asyncio.sleep(backoff)
+                    continue
                 raise Exception(maybe_rpc_error)
 
+            last_resp = resp
             resp_value = resp["result"]["value"][0]
             if resp_value is not None:
-                confirmation_status = resp_value["confirmationStatus"]
-                confirmation_rank = COMMITMENT_RANKS[confirmation_status]
-                commitment_rank = COMMITMENT_RANKS[commitment]
-                if confirmation_rank >= commitment_rank:
-                    break
+                confirmation_status = resp_value.get("confirmationStatus")
+                last_seen_status = confirmation_status
+                if confirmation_status is not None:
+                    confirmation_rank = COMMITMENT_RANKS[confirmation_status]
+                    commitment_rank = COMMITMENT_RANKS[commitment]
+                    if confirmation_rank >= commitment_rank:
+                        print(f'confirm_transaction >> success: {confirmation_status}')
+                        break
             await asyncio.sleep(sleep_seconds)
         else:
-            maybe_rpc_error = resp.get("error")
-            if maybe_rpc_error is not None:
-                raise Exception(maybe_rpc_error)
+            # Timed out. The transaction may still have been accepted by the
+            # cluster (any status observed): return the last response instead
+            # of raising so the caller knows the tx was at least submitted.
+            # Only raise if we never observed the transaction at all.
+            if last_resp is not None and last_seen_status is not None:
+                print(f'confirm_transaction >> timeout reached, but tx was last seen as "{last_seen_status}"; returning last status')
+                return last_resp
             raise Exception(f"Unable to confirm transaction {tx_sig}")
 
-    return resp
+    return last_resp if last_resp is not None else resp
 
 async def transfer_sol_token(
     sender_address: str,
