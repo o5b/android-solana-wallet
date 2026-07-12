@@ -24,6 +24,32 @@ set (see Security below); the PIN itself is never stored. `address_base58` and
   - `transaction_history.py` — tx history (parallel fetch)
   - `swap.py` — Jupiter Swap API V2 (quote + assembled V0 tx; **mainnet-only**)
   - `versioned_transaction.py` — V0 (versioned) tx signing/serialization for swaps
+  - `wallet_standard.py` — **dApp signing capability layer** (transport-agnostic):
+    `sign_message`/`verify_message` (ed25519, wallet-adapter `signMessage` — refuses
+    to sign a payload that parses as a transaction message, so it can't be abused as
+    a tx-signing oracle), `sign_transaction`/`sign_and_send_transaction` (sign
+    legacy/V0 tx; enforce fee-payer==signer, single-signer, and refuse unknown
+    programs unless `allow_unknown_programs=True`), `preview_transaction` (fee payer
+    / programs / signers summary, ALT-safe), and SIWS (`SIWSPayload` model with
+    newline-control-char validation + address-must-equal-signer binding +
+    `format_siws_message` + `sign_in_with_solana`). `KNOWN_PROGRAMS` is the canonical
+    program registry; `describe_program()` annotates previews and
+    `validate_program_registries()` asserts `swap.ALLOWED_PROGRAM_ID ⊆ KNOWN_PROGRAMS`.
+    Reuses `versioned_transaction`, `keypair`, `swap.send_raw_transaction`,
+    `transfer_sol.confirm_transaction`. No transport yet (WC2 is the next step).
+  - `simulation.py` — **transaction simulation & preview** (anti-phishing):
+    `analyze_transaction(tx_b64, network, signer_pubkey=)` runs `simulateTransaction`
+    (`sigVerify=false`, `replaceRecentBlockhash=true` — safe on unsigned dApp txs) +
+    `getFeeForMessage`, returns `{status, error, compute_units, fee_lamports,
+    fee_sol, fee_payer, programs, unknown_programs, sol_changes, token_changes,
+    logs, warnings}`. `sol_changes`/`token_changes` are real per-account deltas
+    (who pays/receives, incl. token drain) — the core of phishing detection.
+    Also exposes `get_fee_for_message`/`get_fee_for_message_bytes` +
+    `simulate_transaction_raw`. `analyze_transaction` runs fee + simulation as one
+    pooled, parallelized pair of RPC calls, and **degrades** to
+    `status="simulation_failed"` (still returning the static preview + fee) instead
+    of raising on a `simulateTransaction` error (incl. public-RPC 429 — `_rpc`
+    backs off like `confirm_transaction`).
   - `security.py` — PIN key derivation (scrypt) + Fernet secret encryption, PIN
     verification, wallet encrypt/decrypt + migration of legacy plaintext records
   - `validators.py`, `keypair.py`, `publickey.py`, `transaction.py`, `commitment.py`, ...
@@ -214,6 +240,56 @@ If the wallet was added without a private key, an "Enter Secret" field appears o
 - **NEW** Watch-only wallets: "Add Wallet Address" sets `watch_only: true` (no private key);
   the wallet card shows an orange "Watch-only (no private key)" badge. Transfers/swaps on a
   watch-only wallet still prompt for a one-time secret (existing behaviour).
+
+### Session 2026-07-12 (dApp signing)
+
+- **NEW** `src/solana/wallet_standard.py`: transport-agnostic dApp signing capability layer
+  (foundation for WalletConnect / Solana Wallet Standard). Functions:
+  - `sign_message(pk_hex, msg)` / `verify_message(addr, msg, sig)` — ed25519, wallet-adapter
+    `signMessage` parity (str→UTF-8, raw bytes supported). Returns base58 + hex sigs.
+  - `sign_transaction(pk_hex, tx_b64)` — signs a serialized legacy/V0 tx **without** broadcasting
+    (reuses `versioned_transaction.sign_base64`); enforces single-signer + fee-payer==signer.
+  - `sign_and_send_transaction(pk_hex, tx_b64, network, confirm=True)` — sign + broadcast
+    (`swap.send_raw_transaction`) + optional confirm (`transfer_sol.confirm_transaction`).
+  - `preview_transaction(tx_b64)` — `{version, fee_payer, accounts, required_signatures,
+    programs, unknown_programs}` for the future tx-simulation/anti-phishing UI.
+  - SIWS: `SIWSPayload` (pydantic, snake_case + camelCase aliases), `format_siws_message`
+    (canonical plaintext), `sign_in_with_solana(pk_hex, payload)`.
+  - `KNOWN_PROGRAMS` registry + `describe_program()` annotate previews.
+  - Verified headless (sign/verify round-trip, SIWS, sign_transaction on a crafted legacy tx,
+    fee-payer mismatch rejected) **and** end-to-end on devnet (W1→W1, sig confirmed `err=None`).
+  - **No transport yet** — the next step is WalletConnect v2 (QR pairing + relay) calling these.
+
+### Session 2026-07-12 (transaction simulation)
+
+- **NEW** `src/solana/simulation.py`: anti-phishing transaction simulation. `analyze_transaction`
+  runs `simulateTransaction` (unsigned-safe: `sigVerify=false`, `replaceRecentBlockhash=true`) +
+  `getFeeForMessage`, and returns real per-account SOL/Token deltas, compute units, fee, predicted
+  status/error, and warnings (spend outflow, token drain, recipient receives SOL, unverified
+  programs, predicted failure). Verified end-to-end on devnet: a 0.001 SOL W1→W2 transfer correctly
+  reports W1 `-0.001005` (incl. 5000-lamport fee) / W2 `+0.001`, compute=150, status=ok; an
+  over-balance transfer correctly reports `InstructionError [0, {Custom: 1}]` + "Transaction will
+  FAIL". This is the layer that should be called before any dApp `sign_transaction`/`sign_and_send`
+  to show the user what they are really approving.
+
+### Session 2026-07-12 (dApp-signing hardening after code review)
+
+- **FIXED** `sign_message` oracle: now refuses to sign a payload that parses as a valid
+  transaction message (strict bounds-checked detector `_looks_like_tx_message`), so it can't be
+  abused as a tx-signing bypass. Ordinary text/SIWS plaintext still signs.
+- **FIXED** SIWS safety: `SIWSPayload` rejects `\n`/`\r` in line-oriented fields (format-injection
+  guard), and `sign_in_with_solana` refuses unless `payload.address == signer pubkey`.
+- **FIXED** `preview_transaction` no longer crashes on V0+ALT txs (program-id decode now wrapped,
+  ALT-safe), so `sign_transaction` is too.
+- **FIXED** `sign_transaction`/`sign_and_send_transaction` refuse unknown programs by default
+  (`allow_unknown_programs=False`), parity with `swap.swap`'s allowlist; the returned result now
+  includes `unknown_programs`.
+- **FIXED** `analyze_transaction` degrades to `status="simulation_failed"` instead of raising on a
+  `simulateTransaction` error; `_rpc` now backs off on HTTP/JSON-RPC 429 and accepts a shared
+  `httpx.AsyncClient`. Fee + simulation run as one pooled, parallel pair of calls.
+- **NEW** `get_fee_for_message_bytes` (reuse already-decoded message), `validate_program_registries()`
+  (asserts `swap.ALLOWED_PROGRAM_ID ⊆ KNOWN_PROGRAMS`).
+- **REMOVED** dead `KNOWN_PROGRAMS` entry with a leading space.
 
 ## Security reminders
 
