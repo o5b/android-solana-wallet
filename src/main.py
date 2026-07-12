@@ -2,6 +2,7 @@ from datetime import datetime
 import asyncio
 import time
 import random
+import os
 import flet
 import base64
 import json
@@ -2401,6 +2402,318 @@ async def main(page: flet.Page):
        ]
     )
 
+    # ===================== WalletConnect v2 =====================
+    from solana.walletconnect import WalletConnectClient, WalletConnectError, SOLANA_CHAINS
+
+    WC_PROJECT_ID_KEY = "wc.project_id"
+    WC_IDENTITY_KEY = "wc.identity_seed"
+    wc_state: dict = {"client": None}
+
+    async def _wc_get_project_id() -> str | None:
+        if await page.shared_preferences.contains_key(WC_PROJECT_ID_KEY):
+            v = await page.shared_preferences.get(WC_PROJECT_ID_KEY)
+            if v:
+                return v
+        return None
+
+    async def _wc_get_identity_seed() -> bytes:
+        if await page.shared_preferences.contains_key(WC_IDENTITY_KEY):
+            v = await page.shared_preferences.get(WC_IDENTITY_KEY)
+            try:
+                return bytes.fromhex(v)
+            except Exception:
+                pass
+        seed = os.urandom(32)
+        await page.shared_preferences.set(WC_IDENTITY_KEY, seed.hex())
+        return seed
+
+    async def _wc_resolve_signer(account_b58: str | None) -> str | None:
+        if not account_b58:
+            return None
+        wallets = await get_storage_data(prefix="wallet.")
+        for w in wallets:
+            if w.get("address_base58") == account_b58:
+                if w.get(WATCH_ONLY_FIELD):
+                    return None
+                try:
+                    return get_wallet_private_key(w)
+                except Exception:
+                    return None
+        return None
+
+    def _wc_dapp_name(obj: dict) -> str:
+        md = obj.get("peerMetadata") or obj.get("proposer", {}).get("metadata") or {}
+        return md.get("name") or md.get("url") or "dApp"
+
+    async def _wc_refresh_sessions() -> None:
+        wc_sessions_list.controls.clear()
+        client = wc_state["client"]
+        if client is None or not client.list_sessions():
+            wc_sessions_list.controls.append(flet.Text("No active sessions."))
+        else:
+            for s in client.list_sessions():
+                peer_md = s.get("peerMetadata", {}) or {}
+                acct_short = ", ".join(a.split(":")[-1] for a in s.get("accounts", []))
+                wc_sessions_list.controls.append(
+                    flet.Card(
+                        content=flet.Container(
+                            content=flet.Column(
+                                [
+                                    flet.Text(_wc_dapp_name(s), size=16, weight=flet.FontWeight.BOLD),
+                                    flet.Text(peer_md.get("url") or "", size=11, selectable=True),
+                                    flet.Text("accounts: " + acct_short, size=11, selectable=True),
+                                    flet.Row(
+                                        [flet.OutlinedButton("Disconnect", data=s["topic"], on_click=wc_disconnect_click)]
+                                    ),
+                                ]
+                            ),
+                            padding=10,
+                            width=360,
+                        )
+                    )
+                )
+        try:
+            page.update()
+        except Exception:
+            pass
+
+    async def wc_disconnect_click(e):
+        client = wc_state["client"]
+        if client:
+            await client.disconnect_session(e.control.data)
+        await _wc_refresh_sessions()
+
+    async def on_wc_proposal(proposal: dict) -> None:
+        wallets = await get_storage_data(prefix="wallet.")
+        addrs = [w.get("address_base58") for w in wallets if w.get("address_base58")]
+        if not addrs:
+            page.show_dialog(flet.AlertDialog(title=flet.Text("No wallets available. Add a wallet first.")))
+            return
+        dd = flet.Dropdown(
+            label="Account to connect",
+            options=[flet.dropdown.Option(a) for a in addrs],
+            value=addrs[0],
+            width=320,
+        )
+        req_ns = proposal.get("requiredNamespaces", {}) or {}
+        chains: list = []
+        methods: list = []
+        for ns in req_ns.values():
+            chains += (ns or {}).get("chains", []) or []
+            methods += (ns or {}).get("methods", []) or []
+        meta = (proposal.get("proposer", {}) or {}).get("metadata", {}) or {}
+
+        async def do_approve(e):
+            dlg_p.open = False
+            page.update()
+            client = wc_state["client"]
+            try:
+                topic = await client.approve(proposal["id"], accounts=[dd.value])
+                page.show_dialog(flet.AlertDialog(title=flet.Text(f"Session approved ({topic[:8]}…).")))
+            except Exception as ex:
+                page.show_dialog(flet.AlertDialog(title=flet.Text(f"Approve failed: {ex}")))
+
+        async def do_reject(e):
+            dlg_p.open = False
+            page.update()
+            client = wc_state["client"]
+            if client:
+                await client.reject(proposal["id"])
+
+        dlg_p = flet.AlertDialog(
+            title=flet.Text(f"Connect to {meta.get('name', 'dApp')}?"),
+            content=flet.Column(
+                [
+                    flet.Text(meta.get("url") or "", size=11, selectable=True),
+                    flet.Text((meta.get("description") or "")[:160], size=11),
+                    flet.Text("Chains: " + ", ".join(chains), size=12),
+                    flet.Text("Methods: " + ", ".join(methods), size=12),
+                    dd,
+                ],
+                scroll=flet.ScrollMode.AUTO,
+                height=280,
+            ),
+            actions=[
+                flet.TextButton("Reject", on_click=do_reject),
+                flet.ElevatedButton("Approve", on_click=do_approve),
+            ],
+            actions_alignment=flet.MainAxisAlignment.END,
+        )
+        page.show_dialog(dlg_p)
+
+    def _wc_render_preview(preview: dict) -> str:
+        method = preview.get("method")
+        lines = [f"Method: {method}", f"Chain: {preview.get('chain_id')}"]
+        decoded = preview.get("decoded") or {}
+        if decoded.get("programs"):
+            lines.append("Programs: " + ", ".join(decoded["programs"]))
+        if decoded.get("unknown_programs"):
+            lines.append("⚠ Unverified programs: " + ", ".join(decoded["unknown_programs"]))
+        sim = preview.get("simulation") or {}
+        if sim:
+            lines.append("Predicted status: " + str(sim.get("status")))
+            if sim.get("fee_sol") is not None:
+                lines.append("Fee: " + str(sim.get("fee_sol")) + " SOL")
+            for ch in (sim.get("sol_changes") or [])[:8]:
+                acct = str(ch.get("account", ""))
+                lines.append(f"SOL Δ {acct[:10]}…: {ch.get('delta_sol', 0):+.9f}")
+            for ch in (sim.get("token_changes") or [])[:8]:
+                acct = str(ch.get("account", ""))
+                lines.append(
+                    f"Token Δ {acct[:10]}…: {ch.get('delta_amount', '?')} ({ch.get('mint', '')[:8]}…)"
+                )
+            for w in sim.get("warnings") or []:
+                lines.append("⚠ " + w)
+        if preview.get("message_utf8") is not None:
+            lines.append("Message: " + str(preview["message_utf8"]))
+        if preview.get("preview_error"):
+            lines.append("preview error: " + str(preview["preview_error"]))
+        return "\n".join(lines)
+
+    async def on_wc_request(session: dict, request: dict, preview: dict) -> None:
+        rid = request["id"]
+        method = request.get("method")
+        accounts = [a.split(":")[-1] for a in session.get("accounts", [])]
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        target = params.get("pubkey") if params else None
+        if not target and accounts:
+            target = accounts[0]
+        preview_text = _wc_render_preview(preview)
+
+        async def do_approve(e):
+            dlg_r.open = False
+            page.update()
+            client = wc_state["client"]
+            priv = await _wc_resolve_signer(target)
+            if not priv:
+                page.show_dialog(
+                    flet.AlertDialog(title=flet.Text(f"No private key for {target} (watch-only / not found)."))
+                )
+                await client.reject_request(rid)
+                return
+            try:
+                await client.approve_request(rid, priv)
+                page.show_dialog(flet.AlertDialog(title=flet.Text("Signed & sent to dApp.")))
+            except Exception as ex:
+                page.show_dialog(flet.AlertDialog(title=flet.Text(f"Sign failed: {ex}")))
+                await client.reject_request(rid)
+
+        async def do_reject(e):
+            dlg_r.open = False
+            page.update()
+            client = wc_state["client"]
+            if client:
+                await client.reject_request(rid)
+
+        sim = preview.get("simulation") or {}
+        sim_fail = sim.get("status") == "error"
+        content_controls = [
+            flet.Text(f"Account: {target or '?'}", size=11, selectable=True),
+            flet.Text(preview_text, selectable=True, size=12),
+        ]
+        if sim_fail:
+            content_controls.append(
+                flet.Text(
+                    "⚠ Simulation predicts this transaction will FAIL. Signing is blocked.",
+                    color="red", size=12,
+                )
+            )
+        dlg_r = flet.AlertDialog(
+            title=flet.Text(f"dApp request: {method}"),
+            content=flet.Column(
+                content_controls,
+                scroll=flet.ScrollMode.AUTO,
+                height=380,
+            ),
+            actions=[
+                flet.TextButton("Reject", on_click=do_reject),
+                flet.ElevatedButton("Approve & Sign", on_click=do_approve, disabled=sim_fail),
+            ],
+            actions_alignment=flet.MainAxisAlignment.END,
+        )
+        page.show_dialog(dlg_r)
+
+    async def on_wc_session(event: str, session: dict) -> None:
+        await _wc_refresh_sessions()
+
+    async def _wc_ensure_client() -> WalletConnectClient | None:
+        if wc_state["client"] is not None:
+            return wc_state["client"]
+        pid = await _wc_get_project_id()
+        if not pid:
+            pid = (wc_pid_input.value or "").strip()
+            if pid:
+                await page.shared_preferences.set(WC_PROJECT_ID_KEY, pid)
+        if not pid:
+            return None
+        seed = await _wc_get_identity_seed()
+        client = WalletConnectClient(
+            pid,
+            seed,
+            signer_resolver=_wc_resolve_signer,
+            on_proposal=on_wc_proposal,
+            on_request=on_wc_request,
+            on_session=on_wc_session,
+        )
+        await client.start()
+        wc_state["client"] = client
+        wc_status_text.value = f"WC ready (clientId {client.client_id[:18]}…)"
+        try:
+            page.update()
+        except Exception:
+            pass
+        return client
+
+    async def wc_connect_click(e):
+        client = await _wc_ensure_client()
+        if client is None:
+            page.show_dialog(
+                flet.AlertDialog(
+                    title=flet.Text("Enter your WalletConnect projectId first (free at cloud.walletconnect.com).")
+                )
+            )
+            return
+        uri = (wc_uri_input.value or "").strip()
+        if not uri.startswith("wc:"):
+            page.show_dialog(flet.AlertDialog(title=flet.Text("Paste a valid 'wc:' URI copied from a dApp.")))
+            return
+        try:
+            await client.pair(uri)
+            wc_status_text.value = "Pairing… waiting for the dApp's session proposal."
+            try:
+                page.update()
+            except Exception:
+                pass
+        except Exception as ex:
+            page.show_dialog(flet.AlertDialog(title=flet.Text(f"Pair failed: {ex}")))
+
+    async def wc_save_pid_click(e):
+        pid = (wc_pid_input.value or "").strip()
+        if pid:
+            await page.shared_preferences.set(WC_PROJECT_ID_KEY, pid)
+            page.show_dialog(flet.AlertDialog(title=flet.Text("projectId saved.")))
+
+    wc_uri_input = flet.TextField(label="Paste dApp 'wc:' URI", width=340, multiline=True, max_lines=3)
+    wc_pid_input = flet.TextField(label="WalletConnect projectId", width=300)
+    wc_status_text = flet.Text("WC: idle", size=12, selectable=True)
+    wc_sessions_list = flet.Column(spacing=8)
+
+    async def wc_enter_page():
+        pid = await _wc_get_project_id()
+        wc_pid_input.value = pid or ""
+        await _wc_refresh_sessions()
+        await _wc_ensure_client()
+
+    async def nav_wc(e):
+        await page.push_route("wc-page")
+
+    connect_dapp_button = flet.ElevatedButton(
+        content=flet.Text("Connect dApp (WalletConnect v2)"),
+        icon=flet.Icons.LINK,
+        on_click=nav_wc,
+        width=320,
+    )
+
     async def route_change(route):
         reset_activity()
         page.views.clear()
@@ -2423,6 +2736,9 @@ async def main(page: flet.Page):
             page.views.append(spl_token_page)
         elif page.route == "swap-page":
             page.views.append(swap_page)
+        elif page.route == "wc-page":
+            await wc_enter_page()
+            page.views.append(wc_page)
         # else:
         #     page.views.append(homepage)
         page.update()
@@ -2497,6 +2813,7 @@ async def main(page: flet.Page):
             # flet.Image(src="solana.jpg", width=page.width, height=200, fit=flet.ImageFit.FILL),
             flet.Text('Solana', size=30, font_family="Georgia", weight=flet.FontWeight.BOLD),
             button_group_1,
+            flet.Row([connect_dapp_button], alignment=flet.MainAxisAlignment.CENTER),
             flet.Text('Wallets:', size=30, font_family="Georgia", weight=flet.FontWeight.BOLD),
             await get_wallets_cards(),
         ],
@@ -2593,6 +2910,42 @@ async def main(page: flet.Page):
             flet.Text(value='Редактирование client_storage:', size=20),
             await dev_tools_storage_list(),
         ]
+    )
+
+    wc_page = flet.View(
+        route="wc-page",
+        appbar=flet.AppBar(
+            title=flet.Text("Connect dApp (WalletConnect v2)"),
+            color="white",
+            bgcolor="#8b5cf6",
+            leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
+        ),
+        navigation_bar=navbar,
+        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
+        scroll=flet.ScrollMode.AUTO,
+        controls=[
+            flet.Text("Connect to a dApp", size=26, font_family="Georgia", weight=flet.FontWeight.BOLD),
+            flet.Text(
+                "1) Get a free projectId at cloud.walletconnect.com (one-time).\n"
+                "2) Save it below. 3) Paste the 'wc:' URI a dApp shows you and Connect.",
+                size=11,
+                text_align=flet.TextAlign.CENTER,
+            ),
+            flet.Row(
+                [wc_pid_input, flet.ElevatedButton("Save projectId", on_click=wc_save_pid_click)],
+                alignment=flet.MainAxisAlignment.CENTER,
+            ),
+            flet.Divider(),
+            flet.Column(
+                [wc_uri_input,
+                 flet.ElevatedButton("Connect", on_click=wc_connect_click, icon=flet.Icons.LINK, width=200)],
+                horizontal_alignment=flet.CrossAxisAlignment.CENTER,
+            ),
+            wc_status_text,
+            flet.Divider(),
+            flet.Text("Active sessions:", size=16, weight=flet.FontWeight.BOLD),
+            wc_sessions_list,
+        ],
     )
 
     address_page = flet.View(

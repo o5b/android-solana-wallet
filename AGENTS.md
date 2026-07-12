@@ -54,6 +54,25 @@ set (see Security below); the PIN itself is never stored. `address_base58` and
     verification, wallet encrypt/decrypt + migration of legacy plaintext records
   - `validators.py`, `keypair.py`, `publickey.py`, `transaction.py`, `commitment.py`, ...
   - `transfer_spl.py` — OLD sync version (unused; do not edit)
+  - **WalletConnect v2** (dApp transport, hand-rolled — no WC JS SDK):
+    - `wc2_crypto.py` — relay-interop-critical crypto: X25519 ECDH +
+      HKDF-SHA256(salt=zeros32) → symKey, `topic=sha256(hexbytes(symKey))`,
+      ChaCha20-Poly1305 AEAD, and the `base64pad([type]‖…)` envelope
+      (type 0=direct / 1=x25519 / 2=plain). Plus `parse_pairing_uri` and the
+      EdDSA relay-auth JWT (`did:key:z…` issuer, seconds-based iat/exp).
+      **Every byte reverse-engineered** from `@walletconnect/utils` 2.23.10 +
+      `relay-auth` 1.1.0 + `time` 1.0.2 to be bit-compatible with real dApps.
+    - `wc2_relay.py` — async WebSocket relay client (`wss://relay.walletconnect.com`)
+      speaking the IRN JSON-RPC (`irn_subscribe/publish/subscription`), with JWT
+      auth, JSON-RPC request/response correlation, and auto-reconnect+resubscribe.
+    - `walletconnect.py` — `WalletConnectClient` sign client (responder): pair →
+      `wc_sessionPropose` (1100) → approve (gen X25519, derive session topic =
+      `hashKey(deriveSymKey(myPriv,proposerPub))`, send propose-response 1101 +
+      settle 1102) → route `wc_sessionRequest` (1108) through
+      `wallet_standard` + `simulation` → respond (1109). Maps `solana_signTransaction`
+      / `solana_signAndSendTransaction` / `solana_signMessage` / `solana_signIn`.
+      CAIP-2 chains in `SOLANA_CHAINS`. Never holds wallet keys: resolves a signer
+      per-account via the injected `signer_resolver` (secrets stay encrypted at rest).
 - `src/assets/` — images
 - `venv/` — project venv (use it for every python/flet command)
 - `devnet-wallets.txt` — test private keys (**gitignored**, see below)
@@ -290,6 +309,47 @@ If the wallet was added without a private key, an "Enter Secret" field appears o
 - **NEW** `get_fee_for_message_bytes` (reuse already-decoded message), `validate_program_registries()`
   (asserts `swap.ALLOWED_PROGRAM_ID ⊆ KNOWN_PROGRAMS`).
 - **REMOVED** dead `KNOWN_PROGRAMS` entry with a leading space.
+
+### Session 2026-07-12 (WalletConnect v2)
+
+- **NEW** `src/solana/wc2_crypto.py`: relay-interop crypto. X25519 + HKDF-SHA256
+  (salt=zeros32, info=∅) → 32-byte symKey; `topic=sha256(hexbytes(symKey)).hex()`;
+  ChaCha20-Poly1305 AEAD (12-byte iv, 16-byte tag); envelope =
+  `base64pad([type]‖payload)` (0=direct `type‖iv(12)‖sealed`, 1=x25519
+  `type‖senderPub(32)‖iv(12)‖sealed`, 2=plain). EdDSA relay-auth JWT with
+  `did:key:z<base58(0xed01‖pub)>` issuer, seconds iat/exp. `parse_pairing_uri`.
+- **NEW** `src/solana/wc2_relay.py`: `RelayClient` — async WebSocket to
+  `wss://relay.walletconnect.com`, IRN JSON-RPC (`irn_subscribe/publish/
+  subscription/unsubscribe`), JWT auth, request/response correlation, auto-reconnect
+  + resubscribe. The relay requires a registered projectId (HTTP 403 `invalid key`
+  otherwise).
+- **NEW** `src/solana/walletconnect.py`: `WalletConnectClient` (responder). pair →
+  `wc_sessionPropose`(1100) → `approve()` generates X25519 key, derives
+  `sessionTopic=hashKey(deriveSymKey(myPriv,proposerPub))`, sends propose-response
+  (1101, `responderPublicKey`) + `wc_sessionSettle`(1102). Routes
+  `wc_sessionRequest`(1108) → `wallet_standard` + `simulation` → respond (1109).
+  Maps `solana_signTransaction` / `solana_signAndSendTransaction` /
+  `solana_signMessage` / `solana_signIn` (result key `signature` = base58; signTransaction
+  also returns `signedTransaction`). CAIP-2 chains in `SOLANA_CHAINS`. Never holds
+  wallet keys (signer_resolver). Tags verified against `@walletconnect/sign-client`
+  2.23.10 (propose=1100/1101, settle=1102/1103, request=1108/1109, delete=1112/1113).
+- **NEW** UI in `src/main.py`: "Connect dApp (WalletConnect v2)" button on the
+  homepage → `wc-page`: projectId input (stored in `shared_preferences` under
+  `wc.project_id`), `wc:` URI paste + Connect, active-sessions list with Disconnect.
+  Identity seed persisted under `wc.identity_seed`. Incoming proposals show a
+  dialog (dApp metadata + required chains/methods + account picker → Approve/Reject);
+  incoming requests show the simulation preview (programs, fee, SOL/token deltas,
+  warnings) → Approve & Sign / Reject.
+- **VERIFIED** crypto self-tests (X25519 ECDH symmetry, envelope round-trips, did:key
+  multicodec `K36`, EdDSA JWT), a live relay connect attempt (WS+JWT correct —
+  relay returns 403 only for a placeholder projectId), and a full **mock-relay**
+  integration test (`test_wc2_integration.py`: dApp proposer ↔ wallet responder,
+  real envelopes, session topic derived identically by both sides, signMessage +
+  signTransaction round-trips with verified signatures, disconnect).
+- **TO USE LIVE**: register a free projectId at https://cloud.walletconnect.com,
+  paste it on the `wc-page` → Save, then paste a dApp's `wc:` URI → Connect.
+  Run `PYTHONPATH=src venv/bin/python test_wc2_integration.py` for the offline
+  protocol test.
 
 ## Security reminders
 

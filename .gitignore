@@ -177,3 +177,5 @@ secrets/
 
 .kilocodeignore
 .kilo/
+
+.playwright-mcp/
