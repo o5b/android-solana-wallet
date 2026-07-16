@@ -19,7 +19,12 @@ set (see Security below); the PIN itself is never stored. `address_base58` and
 - `src/solana/` — blockchain logic:
   - `balance.py` — SOL/SPL balances, metadata parsing, transfer-cost estimate
   - `transfer_sol.py` — SOL transfer + `confirm_transaction` (confirmation polling)
-  - `spl_token.py` — SPL/Token-2022 transfer, airdrop, ATA helpers
+  - `spl_token.py` — SPL/Token-2022 transfer, airdrop, ATA helpers, **burn/close**:
+    `burn_instruction`/`close_account_instruction` (InstructionType BURN=8 /
+    CLOSE_ACCOUNT=9), `get_ata_raw_amount` (reads exact on-chain balance so a full
+    burn has no float drift), `burn_token` (partial), `close_token_account`
+    (rent refund, requires 0 balance), `burn_and_close_token_account` (burns full
+    balance + closes the ATA in one tx — the "return rent" flow)
   - `create_wallet.py` — BIP39 + BIP32-ed25519 key derivation, recovery
   - `transaction_history.py` — tx history (parallel fetch)
   - `swap.py` — Jupiter Swap API V2 (quote + assembled V0 tx; **mainnet-only**)
@@ -74,6 +79,9 @@ set (see Security below); the PIN itself is never stored. `address_base58` and
       CAIP-2 chains in `SOLANA_CHAINS`. Never holds wallet keys: resolves a signer
       per-account via the injected `signer_resolver` (secrets stay encrypted at rest).
 - `src/assets/` — images
+- `tests/` — headless/integration tests (run with `PYTHONPATH=src venv/bin/python tests/<file>.py`):
+  `test_wc2_integration.py` (mock-relay WC2 protocol), `test_burn_close.py`
+  (burn/close instruction encoding + readonly devnet + opt-in destructive)
 - `venv/` — project venv (use it for every python/flet command)
 - `devnet-wallets.txt` — test private keys (**gitignored**, see below)
 
@@ -348,7 +356,7 @@ If the wallet was added without a private key, an "Enter Secret" field appears o
   signTransaction round-trips with verified signatures, disconnect).
 - **TO USE LIVE**: register a free projectId at https://cloud.walletconnect.com,
   paste it on the `wc-page` → Save, then paste a dApp's `wc:` URI → Connect.
-  Run `PYTHONPATH=src venv/bin/python test_wc2_integration.py` for the offline
+  Run `PYTHONPATH=src venv/bin/python tests/test_wc2_integration.py` for the offline
   protocol test.
 
 ### Session 2026-07-16 (USD portfolio + prices)
@@ -377,6 +385,35 @@ If the wallet was added without a private key, an "Enter Secret" field appears o
   MEW $0.000354, TNSR $0.03; PENGU/SEND/test mint correctly omitted), and
   `enrich_balance_result_with_prices` on a devnet+mainnet mix (devnet ignored,
   mainnet SOL+USDC priced, total computed, zero-amount token skipped).
+
+### Session 2026-07-16 (Burn / Close token accounts)
+
+- **NEW** burn/close core in `src/solana/spl_token.py`: `burn_instruction`
+  (InstructionType BURN=8 → `[8]‖amount_u64`), `close_account_instruction`
+  (CLOSE_ACCOUNT=9 → single byte, no args; needs 0 balance), `get_ata_raw_amount`
+  (reads the exact on-chain base-unit amount straight from `ACCOUNT_LAYOUT` so a
+  full burn has zero float drift), `burn_token` (partial), `close_token_account`
+  (refund rent, fails if balance≠0), `burn_and_close_token_account` (burns the
+  full fetched balance + closes the ATA in one tx — the "return rent" flow).
+  Token Program vs Token-2022 resolved from the mint's owner via
+  `get_token_program_id` (same path as the existing SPL transfer). Private
+  `_sign_send_confirm`/`_resolve_program_id`/`_coerce_program_id` helpers.
+- **NEW** `tests/` folder: moved `test_wc2_integration.py` here and added
+  `test_burn_close.py` (offline instruction encoding + readonly devnet
+  `get_ata_raw_amount` + full burn+close tx ASSEMBLY+SIGNING without submit +
+  opt-in `RUN_DESTRUCTIVE=1` real burn+close). Run with
+  `PYTHONPATH=src venv/bin/python tests/<file>.py`.
+- **NEW** UI in `src/main.py` SPL token page (`go_to_spl_token_page_button_click`):
+  "Burn" (partial, uses the amount field) and "Burn All & Close Account"
+  (destructive, modal confirm → burns full on-chain balance + closes ATA → rent
+  refund). Buttons carry explicit control refs (`amount_tf`/`secret_tf`/`status`)
+  in `data` instead of positional index reads, so the new controls don't shift
+  the existing transfer handler's indices. New `resolve_signing_key(data, secret_control)`
+  helper centralizes private-key resolution (stored key, else seed/private-key
+  from the secret field) — reused by both burn actions.
+- **VERIFIED** headless: BURN/CLOSE instruction bytes (exact), ATA determinism,
+  `get_ata_raw_amount` on W1's real Token-2022 holding (45 base units, 9 dp), and
+  a fully assembled+signed burn+close tx (252-byte wire, not submitted).
 
 ## Security reminders
 

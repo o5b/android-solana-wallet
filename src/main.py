@@ -14,7 +14,7 @@ from solana.create_wallet import create_solana_wallet
 from solana.balance import get_sol_spl_balance, get_sol_balance
 from solana.transfer_sol import transfer_sol_token, get_min_sol_balance
 # from solana.transfer_spl import transfer_spl_token
-from solana.spl_token import request_airdrop, transfer_spl_token
+from solana.spl_token import request_airdrop, transfer_spl_token, burn_token, close_token_account, burn_and_close_token_account
 from solana.swap import get_quote as jup_get_quote, swap as jup_swap
 from solana.prices import enrich_balance_result_with_prices, fmt_usd, fmt_change
 from solana.validators import is_valid_amount, is_valid_wallet_address, is_valid_private_key, is_valid_wallet_seed_phrase
@@ -162,6 +162,37 @@ async def main(page: flet.Page):
 
     def has_wallet_private_key(wallet: dict) -> bool:
         return bool(get_wallet_private_key(wallet))
+
+    def resolve_signing_key(data: dict, secret_control=None) -> tuple[str, str]:
+        """Resolve a private key hex for a token/burn action.
+
+        Returns (private_key_hex, error_message). Tries the stored (decrypted)
+        key first, then falls back to the secret TextField (12/24 words or raw
+        hex private key) entered on the page. Mirrors the transfer handlers.
+        """
+        pk = get_wallet_private_key(data.get('wallet_data') or {})
+        if pk:
+            return pk, ''
+        input_secret = ''
+        if secret_control is not None:
+            try:
+                input_secret = (secret_control.value or '').strip()
+            except Exception:
+                input_secret = ''
+        if not input_secret:
+            return '', "Private key is required (unlock the wallet or enter the secret)."
+        wallet_data = data['wallet_data']
+        if is_valid_wallet_seed_phrase(input_secret):
+            for attempt in range(10):
+                words, wallet_address_base58, secret_key_base58, new_private_key_hex, public_key_hex, error = create_solana_wallet(secret=input_secret)
+                if wallet_address_base58 == wallet_data['address_base58']:
+                    return new_private_key_hex, ''
+                if error:
+                    return '', f"Error getting private key: {error}"
+            return '', "Failed to get private key from seed phrase."
+        if is_valid_private_key(input_secret) and len(input_secret) == 64:
+            return input_secret, ''
+        return '', "Invalid secret."
 
     def decrypt_for_display(wallet: dict) -> dict:
         """Wallet dict with secrets decrypted (for the Wallet Info dialog)."""
@@ -1387,6 +1418,46 @@ async def main(page: flet.Page):
         print(f'****** go_to_spl_token_page_button_click >> e.control.data: {e.control.data}')
         data = e.control.data
         el_spl_token_page.controls.clear()
+        amount_tf = flet.TextField(label="Input the amount", min_lines=1, max_lines=1, max_length=20)
+        recipient_tf = flet.TextField(label="Enter the recipient's address", min_lines=1, max_lines=1, max_length=100)
+        secret_tf = flet.TextField(label="Enter Secret (12/24 Words or Private Key)", min_lines=1, max_lines=1, max_length=100)
+        burn_status = flet.Column()
+        burn_data = {
+            **data,
+            'amount_tf': amount_tf,
+            'secret_tf': secret_tf,
+            'status': burn_status,
+        }
+        close_data = {
+            **data,
+            'secret_tf': secret_tf,
+            'status': burn_status,
+        }
+        burn_section = flet.Column(
+            [
+                flet.Row(
+                    [
+                        flet.ElevatedButton(
+                            content=flet.Text("Burn"),
+                            on_click=burn_spl_button_click,
+                            data=burn_data,
+                            disabled=False if (data['spl_amount'] and data['spl_amount'] > 0) else True,
+                        ),
+                        flet.ElevatedButton(
+                            content=flet.Text("Burn All & Close Account"),
+                            on_click=burn_and_close_button_click,
+                            data=close_data,
+                        ),
+                    ],
+                ),
+                flet.Text(
+                    value="Burn destroys tokens. Close Account also refunds the rent SOL (~0.002) to your wallet.",
+                    size=11,
+                    color=flet.Colors.GREY_600,
+                ),
+                burn_status,
+            ]
+        )
         el_spl_token_page.controls.extend(
             [
                 flet.Row(
@@ -1437,16 +1508,9 @@ async def main(page: flet.Page):
                         ),
                     ],
                 ),
-                flet.Row(
-                    [
-                        flet.TextField(label="Input the amount", min_lines=1, max_lines=1, max_length=20)
-                    ],
-                ),
-                flet.Row(
-                    [
-                        flet.TextField(label="Enter the recipient's address", min_lines=1, max_lines=1, max_length=100)
-                    ],
-                ),
+                flet.Row([amount_tf]),
+                flet.Row([recipient_tf]),
+                burn_section,
                 flet.Row(
                     [
                         flet.ElevatedButton(
@@ -1462,11 +1526,7 @@ async def main(page: flet.Page):
         if not has_wallet_private_key(data['wallet_data']):
              el_spl_token_page.controls.insert(
                 6,
-                flet.Row(
-                    [
-                        flet.TextField(label="Enter Secret (12/24 Words or Private Key)", min_lines=1, max_lines=1, max_length=100)
-                    ],
-                )
+                flet.Row([secret_tf])
             )
         await page.push_route("spl-token-page")
 
@@ -1546,6 +1606,124 @@ async def main(page: flet.Page):
         e.control.parent.parent.controls[-1].controls.clear()
         e.control.disabled = False
         page.update()
+
+
+    async def burn_spl_button_click(e):
+        data = e.control.data
+        status = data.get('status')
+        e.control.disabled = True
+        if status is not None:
+            status.controls.clear()
+            status.controls.append(
+                flet.Row([flet.ProgressRing(), flet.Text("BURNING...")], alignment=flet.MainAxisAlignment.CENTER)
+            )
+        page.update()
+
+        alert_dialog_text = ''
+        private_key_hex, key_err = resolve_signing_key(data, data.get('secret_tf'))
+
+        if private_key_hex:
+            amount_tf = data.get('amount_tf')
+            amount_str = ''
+            if amount_tf is not None:
+                try:
+                    amount_str = (amount_tf.value or '').strip()
+                except Exception:
+                    amount_str = ''
+            if is_valid_amount(amount_str):
+                amount = float(amount_str)
+                if 0 < amount <= data['spl_amount']:
+                    result = await burn_token(
+                        owner_address=data['wallet_address'],
+                        owner_private_key=private_key_hex,
+                        mint_address=data['raw_data']['mint'],
+                        amount=amount,
+                        decimals=data['raw_data']['decimals'],
+                        network=data['network'],
+                        program_id=data['raw_data'].get('program_id'),
+                    )
+                    if 'result' in result:
+                        alert_dialog_text = f"Burn of {amount} {data['symbol']} was successful!"
+                    elif 'error' in result:
+                        alert_dialog_text = f"Burn Error: {result['error']}"
+                    else:
+                        alert_dialog_text = "Burn failed for an unknown reason."
+                else:
+                    alert_dialog_text = "Invalid burn amount."
+            else:
+                alert_dialog_text = "Invalid amount format."
+        else:
+            alert_dialog_text = key_err or "Could not proceed. Private key is missing or invalid."
+
+        page.show_dialog(flet.AlertDialog(title=flet.Text(alert_dialog_text)))
+        e.control.disabled = False
+        if status is not None:
+            status.controls.clear()
+        page.update()
+
+
+    async def burn_and_close_button_click(e):
+        data = e.control.data
+
+        async def _execute(ev):
+            dlg.open = False
+            page.update()
+            status = data.get('status')
+            ev.control.disabled = True
+            if status is not None:
+                status.controls.clear()
+                status.controls.append(
+                    flet.Row([flet.ProgressRing(), flet.Text("BURNING & CLOSING...")], alignment=flet.MainAxisAlignment.CENTER)
+                )
+            page.update()
+
+            alert_dialog_text = ''
+            private_key_hex, key_err = resolve_signing_key(data, data.get('secret_tf'))
+
+            if private_key_hex:
+                result = await burn_and_close_token_account(
+                    owner_address=data['wallet_address'],
+                    owner_private_key=private_key_hex,
+                    mint_address=data['raw_data']['mint'],
+                    network=data['network'],
+                    program_id=data['raw_data'].get('program_id'),
+                )
+                if 'result' in result:
+                    alert_dialog_text = (
+                        f"All {data['symbol']} burned and the token account was closed. "
+                        f"Rent SOL has been refunded to {data['wallet_address']}."
+                    )
+                elif 'error' in result:
+                    alert_dialog_text = f"Burn & Close Error: {result['error']}"
+                else:
+                    alert_dialog_text = "Burn & Close failed for an unknown reason."
+            else:
+                alert_dialog_text = key_err or "Could not proceed. Private key is missing or invalid."
+
+            page.show_dialog(flet.AlertDialog(title=flet.Text(alert_dialog_text)))
+            if status is not None:
+                status.controls.clear()
+            page.update()
+
+        def _cancel(ev):
+            dlg.open = False
+            page.update()
+
+        dlg = flet.AlertDialog(
+            modal=True,
+            title=flet.Text("Burn all and close account?"),
+            content=flet.Text(
+                f"This will DESTROY your entire balance of {data['symbol']} and close the "
+                f"token account, refunding the rent (~0.002 SOL) to your wallet. "
+                f"This action cannot be undone.",
+                selectable=True,
+            ),
+            actions=[
+                flet.TextButton("Cancel", on_click=_cancel),
+                flet.ElevatedButton("Burn & Close", on_click=_execute, bgcolor=flet.Colors.RED, color=flet.Colors.WHITE),
+            ],
+        )
+        page.show_dialog(dlg)
 
 
     async def go_to_token_page_button_click(e):

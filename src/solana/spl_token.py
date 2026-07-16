@@ -9,7 +9,7 @@ import pprint
 from solana.balance import get_account_info
 from solana.publickey import PublicKey
 from solana.transaction import Transaction, TransactionInstruction, AccountMeta
-from solana.layouts import INSTRUCTIONS_LAYOUT, InstructionType
+from solana.layouts import INSTRUCTIONS_LAYOUT, InstructionType, ACCOUNT_LAYOUT
 from solana.commitment import Commitment, Finalized
 from solana.transfer_sol import confirm_transaction, get_blockhash
 
@@ -307,3 +307,201 @@ async def transfer_spl_token(
     except Exception as error:
         print(f"Failed to transfer spl token: {error}")
         return {'error': str(error)}
+
+
+# ---------------------------------------------------------------------------
+# Burn / Close token accounts (recover rent)
+# ---------------------------------------------------------------------------
+
+def _coerce_program_id(program_id) -> PublicKey | None:
+    if not program_id:
+        return None
+    try:
+        return PublicKey(program_id)
+    except Exception:
+        return None
+
+
+async def _resolve_program_id(mint_address: str, network: str) -> PublicKey:
+    """Derive the token program (Token / Token-2022) from the mint's owner."""
+    pid_str = await get_token_program_id(mint=mint_address, network=network)
+    if not pid_str:
+        raise Exception("Failed to resolve token program id for mint")
+    return PublicKey(pid_str)
+
+
+def burn_instruction(
+    source: PublicKey, mint: PublicKey, owner: PublicKey, amount: int, program_id: PublicKey
+) -> TransactionInstruction:
+    """Token BURN (instruction type 8): destroy `amount` base units from `source`."""
+    data = INSTRUCTIONS_LAYOUT.build(
+        {"instruction_type": InstructionType.BURN, "args": {"amount": int(amount)}}
+    )
+    keys = [
+        AccountMeta(pubkey=source, is_signer=False, is_writable=True),
+        AccountMeta(pubkey=mint, is_signer=False, is_writable=True),
+        AccountMeta(pubkey=owner, is_signer=True, is_writable=False),
+    ]
+    return TransactionInstruction(keys=keys, program_id=program_id, data=data)
+
+
+def close_account_instruction(
+    account: PublicKey, destination: PublicKey, owner: PublicKey, program_id: PublicKey
+) -> TransactionInstruction:
+    """Token CLOSE_ACCOUNT (instruction type 9): close `account`, refund rent to `destination`.
+
+    Requires the token account balance to be 0.
+    """
+    data = INSTRUCTIONS_LAYOUT.build(
+        {"instruction_type": InstructionType.CLOSE_ACCOUNT, "args": None}
+    )
+    keys = [
+        AccountMeta(pubkey=account, is_signer=False, is_writable=True),
+        AccountMeta(pubkey=destination, is_signer=False, is_writable=True),
+        AccountMeta(pubkey=owner, is_signer=True, is_writable=False),
+    ]
+    return TransactionInstruction(keys=keys, program_id=program_id, data=data)
+
+
+async def get_ata_raw_amount(
+    owner: PublicKey, mint: PublicKey, program_id: PublicKey, network: str
+) -> tuple[PublicKey, int]:
+    """Return (ata_address, on_chain_raw_amount) for an owner's ATA.
+
+    Reads the raw base-unit amount straight from the account data so a
+    subsequent full-balance burn is exact (no float rounding). Returns 0 when
+    the ATA does not exist yet.
+    """
+    ata = get_associated_token_address(owner=owner, mint=mint, token_program_id=program_id)
+    info = await get_account_info(address=str(ata), network=network)
+    if not info:
+        return ata, 0
+    data_field = info.get("data") if isinstance(info, dict) else None
+    if not data_field or len(data_field) < 1:
+        return ata, 0
+    try:
+        raw = base64.b64decode(data_field[0])
+        parsed = ACCOUNT_LAYOUT.parse(raw)
+        return ata, int(parsed.amount)
+    except Exception as error:
+        print(f"Failed to decode ATA amount for {ata}: {error}")
+        return ata, 0
+
+
+async def _sign_send_confirm(txn: Transaction, keypair: Keypair, network: str) -> dict:
+    """Sign a fully-built tx with a single keypair, send it, and await confirmation."""
+    txn.sign(keypair)
+    url = network
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "sendTransaction",
+        "params": [base58.b58encode(txn.serialize()).decode("utf-8")],
+    }
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, headers=headers, json=payload)
+
+    print(f'response sendTransaction: {response}')
+
+    if response.status_code == 200:
+        response_json = response.json()
+        if "result" in response_json:
+            return await confirm_transaction(tx_sig=response_json["result"], network=network)
+        return response_json
+    return {"error": f"Response status code: {response.status_code}"}
+
+
+async def burn_token(
+    owner_address: str,
+    owner_private_key: str,
+    mint_address: str,
+    amount: float,
+    decimals: int,
+    network: str,
+    program_id: str | None = None,
+) -> dict:
+    """Burn `amount` (human-readable) of an SPL/Token-2022 token from the owner's ATA."""
+    try:
+        owner_pubkey = PublicKey(owner_address)
+        mint_pubkey = PublicKey(mint_address)
+        owner_keypair = Keypair.from_seed(bytes.fromhex(owner_private_key))
+        program_id_pubkey = _coerce_program_id(program_id) or await _resolve_program_id(mint_address, network)
+
+        ata = get_associated_token_address(owner=owner_pubkey, mint=mint_pubkey, token_program_id=program_id_pubkey)
+        raw_amount = int(float(amount) * (10 ** int(decimals)))
+        if raw_amount <= 0:
+            return {"error": "Burn amount must be greater than 0"}
+
+        ix = burn_instruction(ata, mint_pubkey, owner_pubkey, raw_amount, program_id_pubkey)
+        latest_blockhash = await get_blockhash(network)
+
+        txn = Transaction(recent_blockhash=latest_blockhash, fee_payer=owner_pubkey)
+        txn.add(ix)
+        return await _sign_send_confirm(txn, owner_keypair, network)
+    except Exception as error:
+        print(f"Failed to burn token: {error}")
+        return {"error": str(error)}
+
+
+async def close_token_account(
+    owner_address: str,
+    owner_private_key: str,
+    mint_address: str,
+    network: str,
+    program_id: str | None = None,
+) -> dict:
+    """Close the owner's ATA for `mint` and refund the rent SOL to the owner.
+
+    The token account balance MUST be 0; use `burn_and_close_token_account`
+    to empty it first when needed.
+    """
+    try:
+        owner_pubkey = PublicKey(owner_address)
+        mint_pubkey = PublicKey(mint_address)
+        owner_keypair = Keypair.from_seed(bytes.fromhex(owner_private_key))
+        program_id_pubkey = _coerce_program_id(program_id) or await _resolve_program_id(mint_address, network)
+
+        ata = get_associated_token_address(owner=owner_pubkey, mint=mint_pubkey, token_program_id=program_id_pubkey)
+        ix = close_account_instruction(ata, owner_pubkey, owner_pubkey, program_id_pubkey)
+        latest_blockhash = await get_blockhash(network)
+
+        txn = Transaction(recent_blockhash=latest_blockhash, fee_payer=owner_pubkey)
+        txn.add(ix)
+        return await _sign_send_confirm(txn, owner_keypair, network)
+    except Exception as error:
+        print(f"Failed to close token account: {error}")
+        return {"error": str(error)}
+
+
+async def burn_and_close_token_account(
+    owner_address: str,
+    owner_private_key: str,
+    mint_address: str,
+    network: str,
+    program_id: str | None = None,
+) -> dict:
+    """Burn the FULL on-chain balance of an ATA and then close it.
+
+    This is the "return rent" flow: it empties the token account (exact raw
+    amount fetched from chain, so no float drift) and closes it in a single
+    transaction, refunding the ~0.002 SOL rent to the owner.
+    """
+    try:
+        owner_pubkey = PublicKey(owner_address)
+        mint_pubkey = PublicKey(mint_address)
+        owner_keypair = Keypair.from_seed(bytes.fromhex(owner_private_key))
+        program_id_pubkey = _coerce_program_id(program_id) or await _resolve_program_id(mint_address, network)
+
+        ata, raw_amount = await get_ata_raw_amount(owner_pubkey, mint_pubkey, program_id_pubkey, network)
+        latest_blockhash = await get_blockhash(network)
+
+        txn = Transaction(recent_blockhash=latest_blockhash, fee_payer=owner_pubkey)
+        if raw_amount > 0:
+            txn.add(burn_instruction(ata, mint_pubkey, owner_pubkey, raw_amount, program_id_pubkey))
+        txn.add(close_account_instruction(ata, owner_pubkey, owner_pubkey, program_id_pubkey))
+        return await _sign_send_confirm(txn, owner_keypair, network)
+    except Exception as error:
+        print(f"Failed to burn and close token account: {error}")
+        return {"error": str(error)}
