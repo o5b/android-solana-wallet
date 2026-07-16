@@ -16,6 +16,7 @@ from solana.transfer_sol import transfer_sol_token, get_min_sol_balance
 # from solana.transfer_spl import transfer_spl_token
 from solana.spl_token import request_airdrop, transfer_spl_token
 from solana.swap import get_quote as jup_get_quote, swap as jup_swap
+from solana.prices import enrich_balance_result_with_prices, fmt_usd, fmt_change
 from solana.validators import is_valid_amount, is_valid_wallet_address, is_valid_private_key, is_valid_wallet_seed_phrase
 from solana.transaction_history import get_transaction_history
 from solana.security import (
@@ -854,6 +855,15 @@ async def main(page: flet.Page):
             result = await get_sol_spl_balance(wallet['address_base58'], networks)
             print(f'****** get_sol_spl_balance result: {result}')
 
+            # USD pricing (Jupiter Price API v3). Values are attached only to
+            # mainnet entries — devnet/testnet holdings have no real value.
+            try:
+                price_info = await enrich_balance_result_with_prices(result)
+                print(f'****** price_info: {price_info}')
+            except Exception as price_er:
+                print(f'price enrichment skipped: {price_er}')
+                price_info = {"total_usd": 0.0, "priced": 0, "tokens": 0, "mainnet": False}
+
             for i, r in enumerate(result):
                 tmp_balance_spl = []
                 for spl_token in r['spl']:
@@ -885,6 +895,22 @@ async def main(page: flet.Page):
                     #     spl_token_logo.src = "spl-token-placeholder.png"
                     if 'logo' in spl_token and spl_token['logo']:
                         spl_token_logo.src = spl_token['logo']
+                    # USD value spans (mainnet-priced tokens only)
+                    _spl_usd_spans = []
+                    if spl_token.get('usd_value') is not None:
+                        _spl_usd_spans.append(flet.TextSpan(
+                            f'   {fmt_usd(spl_token["usd_value"])}',
+                            flet.TextStyle(size=14, color=flet.Colors.GREY_700),
+                        ))
+                        if spl_token.get('change_24h') is not None:
+                            _chg = spl_token['change_24h']
+                            _spl_usd_spans.append(flet.TextSpan(
+                                f' {fmt_change(_chg)}',
+                                flet.TextStyle(
+                                    size=12,
+                                    color=flet.Colors.GREEN if _chg >= 0 else flet.Colors.RED,
+                                ),
+                            ))
                     tmp_balance_spl.extend(
                         [
                             flet.Row(
@@ -910,6 +936,7 @@ async def main(page: flet.Page):
                                         spans=[
                                             flet.TextSpan(f'{spl_token['amount']}', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
                                             flet.TextSpan(f' {token_symbol}', flet.TextStyle(size=16)),
+                                            *_spl_usd_spans,
                                         ]
                                     ),
                                 ],
@@ -959,6 +986,22 @@ async def main(page: flet.Page):
                             disabled=False,
                         ),
                     )
+                # USD value spans for native SOL (mainnet-priced rows only)
+                _sol_usd_spans = []
+                if r.get('sol_usd') is not None:
+                    _sol_usd_spans.append(flet.TextSpan(
+                        f'   {fmt_usd(r["sol_usd"])}',
+                        flet.TextStyle(size=14, color=flet.Colors.GREY_700),
+                    ))
+                    if r.get('sol_change_24h') is not None:
+                        _chg = r['sol_change_24h']
+                        _sol_usd_spans.append(flet.TextSpan(
+                            f' {fmt_change(_chg)}',
+                            flet.TextStyle(
+                                size=12,
+                                color=flet.Colors.GREEN if _chg >= 0 else flet.Colors.RED,
+                            ),
+                        ))
                 tmp_balance_result.extend(
                     [
                         flet.Row(
@@ -1000,6 +1043,7 @@ async def main(page: flet.Page):
                                     spans=[
                                         flet.TextSpan(f'{r['sol']}', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
                                         flet.TextSpan(' SOL', flet.TextStyle(size=16)),
+                                        *_sol_usd_spans,
                                     ]
                                 ),
                                 *tmp_request_airdrop,
@@ -1011,7 +1055,36 @@ async def main(page: flet.Page):
                 if i < len(result) - 1: # добавляем разделяющую линию после каждого результата кроме последнего
                     tmp_balance_result.append(flet.Divider(thickness=1))
             el_token_balance_data.controls.clear()
-            el_token_balance_data.controls.extend([flet.Divider(thickness=3), *tmp_balance_result])
+            _balance_controls = [flet.Divider(thickness=3)]
+            # Portfolio value banner (mainnet holdings only)
+            if price_info.get('mainnet') and price_info.get('total_usd'):
+                _priced = price_info.get('priced', 0)
+                _tokens = price_info.get('tokens', 0)
+                _note = '' if _priced or not _tokens else ' (no priced tokens)'
+                _balance_controls.append(
+                    flet.Container(
+                        content=flet.Row(
+                            [
+                                flet.Text(
+                                    value='',
+                                    spans=[
+                                        flet.TextSpan('Portfolio value  ', flet.TextStyle(size=14, color=flet.Colors.GREY_700)),
+                                        flet.TextSpan(fmt_usd(price_info['total_usd']), flet.TextStyle(size=22, weight=flet.FontWeight.BOLD)),
+                                    ],
+                                ),
+                            ],
+                            alignment=flet.MainAxisAlignment.CENTER,
+                        ),
+                        padding=flet.padding.symmetric(vertical=6, horizontal=10),
+                        margin=flet.margin.only(bottom=6),
+                        bgcolor=flet.Colors.with_opacity(0.08, flet.Colors.GREEN),
+                        border_radius=flet.border_radius.all(10),
+                    )
+                )
+                if _note:
+                    _balance_controls.append(flet.Text(_note.strip(), size=12, color=flet.Colors.GREY_500))
+            _balance_controls.extend(tmp_balance_result)
+            el_token_balance_data.controls.extend(_balance_controls)
             e.control.disabled = False  # разблокируем кнопку
             print(f'time: {datetime.now() - start} sec')
             page.show_dialog(
@@ -1023,7 +1096,7 @@ async def main(page: flet.Page):
             print(f'Error get_balance_button_click: {er}')
             el_token_balance_data.controls.clear()
             el_token_balance_data.controls.append(
-                flet.Text(f'Error: {er}', color=flet.colors.RED, size=14)
+                flet.Text(f'Error: {er}', color=flet.Colors.RED, size=14)
             )
             try:
                 e.control.disabled = False

@@ -351,6 +351,33 @@ If the wallet was added without a private key, an "Enter Secret" field appears o
   Run `PYTHONPATH=src venv/bin/python test_wc2_integration.py` for the offline
   protocol test.
 
+### Session 2026-07-16 (USD portfolio + prices)
+
+- **NEW** `src/solana/prices.py`: USD price feeds via **Jupiter Price API V3**
+  (`https://api.jup.ag/price/v3`, free, no key). `get_prices(mints)` returns
+  `{mint: {"usd", "change_24h"}}` (unknown/illiquid mints are simply omitted;
+  never raises — returns partial/empty map). Batches mints in chunks of 50 to
+  keep the URL short. `enrich_balance_result_with_prices(result)` attaches USD
+  price/value to a `get_sol_spl_balance` result **mainnet entries only** (native
+  SOL is priced via the wrapped-SOL mint `So111…12`; devnet/testnet holdings have
+  no real value and are left unpriced). Adds `sol_price`/`sol_usd`/`sol_change_24h`
+  + per-network `total_usd` and per-token `usd_price`/`usd_value`/`change_24h`;
+  returns `{total_usd, priced, tokens, mainnet}`. `fmt_usd`/`fmt_change` helpers.
+- **NEW** UI in `src/main.py` `get_balance_button_click`: after `get_sol_spl_balance`,
+  calls `enrich_balance_result_with_prices` (wrapped in try/except so a price fetch
+  failure never breaks balance display). Renders a green **"Portfolio value $X"**
+  banner above the per-network results, and appends `$value (+/-x%)` (green/red) to
+  each SOL row and SPL token row. Zero-amount tokens and unpriced mints show nothing.
+- **FIXED** latent `flet.colors.X` → `flet.Colors.X` (capital C): flet 0.82.2 dropped
+  the lowercase `colors` alias; the pre-existing `flet.colors.RED` in the balance
+  error handler was a latent crash. All balance-screen color references now use
+  `flet.Colors`. (`flet.border_radius`/`flet.padding`/`flet.margin` lowercase are
+  still valid in this version.)
+- **VERIFIED** headless: `get_prices` on real mainnet mints (SOL $76, USDC $1.00,
+  MEW $0.000354, TNSR $0.03; PENGU/SEND/test mint correctly omitted), and
+  `enrich_balance_result_with_prices` on a devnet+mainnet mix (devnet ignored,
+  mainnet SOL+USDC priced, total computed, zero-amount token skipped).
+
 ## Security reminders
 
 - Private keys and mnemonics are stored **encrypted at rest** (Fernet) once a PIN is set;

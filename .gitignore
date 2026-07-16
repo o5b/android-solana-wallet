@@ -179,3 +179,5 @@ secrets/
 .kilo/
 
 .playwright-mcp/
+
+info/
