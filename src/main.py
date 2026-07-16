@@ -11,7 +11,7 @@ import qrcode
 from decimal import Decimal, ROUND_HALF_UP
 
 from solana.create_wallet import create_solana_wallet
-from solana.balance import get_sol_spl_balance, get_sol_balance
+from solana.balance import get_sol_spl_balance, get_sol_balance, get_priority_fee_levels
 from solana.transfer_sol import transfer_sol_token, get_min_sol_balance
 # from solana.transfer_spl import transfer_spl_token
 from solana.spl_token import request_airdrop, transfer_spl_token, burn_token, close_token_account, burn_and_close_token_account
@@ -193,6 +193,122 @@ async def main(page: flet.Page):
         if is_valid_private_key(input_secret) and len(input_secret) == 64:
             return input_secret, ''
         return '', "Invalid secret."
+
+    async def make_priority_fee_block(network: str, account_for_fees: str, cu_limit: int) -> tuple[flet.Column, dict]:
+        """Build a Low / Medium / High / Custom priority-fee selector.
+
+        Fetches recent prioritization-fee levels for `account_for_fees` (the
+        sender for SOL transfers, the mint for SPL transfers) and returns
+        (ui_column, state) where ``state['get']()`` yields the chosen
+        micro-lamports-per-CU price (0 = Auto / no priority fee).
+        """
+        try:
+            levels = await get_priority_fee_levels(account_for_fees, network)
+        except Exception as er:
+            print(f'priority fee levels fetch failed, using defaults: {er}')
+            levels = {'low': 1_000, 'medium': 5_000, 'high': 25_000, 'max': 25_000}
+
+        state = {'micro_lamports': 0}
+
+        def _sol(ul: int) -> str:
+            return f"{(cu_limit * ul) / 1_000_000 / 1_000_000_000:.9f}"
+
+        estimate_txt = flet.Text(size=12, color=flet.Colors.GREY_700, selectable=True)
+        slider_max = max(levels['max'] * 2, 10_000)
+        slider = flet.Slider(min=0, max=slider_max, divisions=200, label="{value}", visible=False)
+        custom_tf = flet.TextField(
+            label="µLamports / CU", value="0", width=150, min_lines=1, max_lines=1,
+            max_length=12, visible=False, keyboard_type=flet.KeyboardType.NUMBER,
+        )
+
+        def _refresh():
+            ul = state['micro_lamports']
+            if ul <= 0:
+                estimate_txt.value = "Priority fee: Auto (no priority fee)"
+            else:
+                estimate_txt.value = f"Priority fee: {ul:,} µLamports/CU → ≈ {_sol(ul)} SOL"
+            try:
+                page.update()
+            except Exception:
+                pass
+
+        def _set(ul: int):
+            state['micro_lamports'] = max(0, int(ul))
+            slider.value = state['micro_lamports']
+            custom_tf.value = str(state['micro_lamports'])
+            _refresh()
+
+        def _preset(ul: int):
+            def _h(_e):
+                slider.visible = False
+                custom_tf.visible = False
+                _set(ul)
+                try:
+                    page.update()
+                except Exception:
+                    pass
+            return _h
+
+        def _custom(_e):
+            slider.visible = True
+            custom_tf.visible = True
+            try:
+                page.update()
+            except Exception:
+                pass
+
+        def _on_slide(_e):
+            try:
+                ul = int(float(slider.value or 0))
+            except Exception:
+                ul = 0
+            custom_tf.value = str(ul)
+            state['micro_lamports'] = max(0, ul)
+            _refresh()
+
+        def _on_custom_change(_e):
+            try:
+                ul = int(float(custom_tf.value or 0))
+            except Exception:
+                ul = 0
+            ul = max(0, min(ul, int(slider_max)))
+            slider.value = ul
+            state['micro_lamports'] = ul
+            _refresh()
+
+        slider.on_change = _on_slide
+        custom_tf.on_change = _on_custom_change
+
+        presets = flet.Row(
+            [
+                flet.ElevatedButton("Auto", on_click=_preset(0)),
+                flet.ElevatedButton("Low", on_click=_preset(levels['low'])),
+                flet.ElevatedButton("Medium", on_click=_preset(levels['medium'])),
+                flet.ElevatedButton("High", on_click=_preset(levels['high'])),
+                flet.ElevatedButton("Custom", on_click=_custom),
+            ],
+            wrap=True,
+        )
+
+        block = flet.Column(
+            [
+                flet.Text("Priority fee (lands faster when the network is busy)", size=13, weight=flet.FontWeight.BOLD),
+                presets,
+                flet.Row([slider]),
+                flet.Row([custom_tf]),
+                estimate_txt,
+            ]
+        )
+        _refresh()
+        state['get'] = lambda: state['micro_lamports']
+        return block, state
+
+    def _pf_from_data(data: dict) -> int | None:
+        """Read the chosen priority fee (micro-lamports) from a button's data, or None."""
+        pf_state = (data or {}).get('pf_state') or {}
+        val = pf_state.get('get', lambda: 0)() if callable(pf_state.get('get')) else pf_state.get('micro_lamports', 0)
+        val = int(val or 0)
+        return val or None
 
     def decrypt_for_display(wallet: dict) -> dict:
         """Wallet dict with secrets decrypted (for the Wallet Info dialog)."""
@@ -1422,17 +1538,23 @@ async def main(page: flet.Page):
         recipient_tf = flet.TextField(label="Enter the recipient's address", min_lines=1, max_lines=1, max_length=100)
         secret_tf = flet.TextField(label="Enter Secret (12/24 Words or Private Key)", min_lines=1, max_lines=1, max_length=100)
         burn_status = flet.Column()
+        pf_block, pf_state = await make_priority_fee_block(data['network'], data['raw_data']['mint'], cu_limit=80000)
         burn_data = {
             **data,
             'amount_tf': amount_tf,
             'secret_tf': secret_tf,
             'status': burn_status,
+            'pf_state': pf_state,
+            'cu_limit': 80000,
         }
         close_data = {
             **data,
             'secret_tf': secret_tf,
             'status': burn_status,
+            'pf_state': pf_state,
+            'cu_limit': 80000,
         }
+        transfer_data = {**data, 'pf_state': pf_state, 'cu_limit': 80000}
         burn_section = flet.Column(
             [
                 flet.Row(
@@ -1511,12 +1633,13 @@ async def main(page: flet.Page):
                 flet.Row([amount_tf]),
                 flet.Row([recipient_tf]),
                 burn_section,
+                pf_block,
                 flet.Row(
                     [
                         flet.ElevatedButton(
                             content=flet.Text("Transfer Token"),
                             on_click=transfer_spl_button_click,
-                            data=data,
+                            data=transfer_data,
                         ),
                     ],
                 ),
@@ -1584,7 +1707,9 @@ async def main(page: flet.Page):
                             amount=transfer_amount,
                             decimals=data['raw_data']['decimals'],
                             network=data['network'],
-                            program_id=data['raw_data']['program_id']
+                            program_id=data['raw_data']['program_id'],
+                            priority_fee=_pf_from_data(data),
+                            cu_limit=data.get('cu_limit', 80000),
                         )
                         if 'result' in result:
                             alert_dialog_text = f"Transfer of {transfer_amount} {data['symbol']} was successful!"
@@ -1641,6 +1766,8 @@ async def main(page: flet.Page):
                         decimals=data['raw_data']['decimals'],
                         network=data['network'],
                         program_id=data['raw_data'].get('program_id'),
+                        priority_fee=_pf_from_data(data),
+                        cu_limit=data.get('cu_limit', 80000),
                     )
                     if 'result' in result:
                         alert_dialog_text = f"Burn of {amount} {data['symbol']} was successful!"
@@ -1687,6 +1814,8 @@ async def main(page: flet.Page):
                     mint_address=data['raw_data']['mint'],
                     network=data['network'],
                     program_id=data['raw_data'].get('program_id'),
+                    priority_fee=_pf_from_data(data),
+                    cu_limit=data.get('cu_limit', 80000),
                 )
                 if 'result' in result:
                     alert_dialog_text = (
@@ -1730,6 +1859,8 @@ async def main(page: flet.Page):
         print(f'****** go_to_token_page_button_click >> e.control.data: {e.control.data}')
         data = e.control.data
         el_token_page.controls.clear()
+        pf_block, pf_state = await make_priority_fee_block(data['network'], data['wallet_address'], cu_limit=2000)
+        transfer_data = {**data, 'pf_state': pf_state, 'cu_limit': 2000}
         el_token_page.controls.extend(
             [
                 flet.Row(
@@ -1779,12 +1910,13 @@ async def main(page: flet.Page):
                         flet.TextField(label="Enter the recipient's address", min_lines=1, max_lines=1, max_length=100)
                     ],
                 ),
+                pf_block,
                 flet.Row(
                     [
                         flet.ElevatedButton(
                             content=flet.Text("Transfer SOL"),
                             on_click=transfer_sol_button_click,
-                            data=data,
+                            data=transfer_data,
                         ),
                     ],
                 ),
@@ -1860,7 +1992,9 @@ async def main(page: flet.Page):
                             sender_private_key=private_key_hex,
                             recipient_address=recipient_address,
                             amount=transfer_sol_amount,
-                            network=data['network']
+                            network=data['network'],
+                            priority_fee=_pf_from_data(data),
+                            cu_limit=data.get('cu_limit', 2000),
                         )
                         # print(f'****** RESULT: {result}')
 

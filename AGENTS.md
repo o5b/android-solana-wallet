@@ -28,6 +28,9 @@ set (see Security below); the PIN itself is never stored. `address_base58` and
   - `create_wallet.py` — BIP39 + BIP32-ed25519 key derivation, recovery
   - `transaction_history.py` — tx history (parallel fetch)
   - `swap.py` — Jupiter Swap API V2 (quote + assembled V0 tx; **mainnet-only**)
+  - `compute_budget.py` — ComputeBudget program ix builders for **priority fees**:
+    `set_compute_unit_limit` (disc 2) / `set_compute_unit_price` (disc 3) +
+    `priority_fee_instructions(price, cu_limit)` (→ `[]` when price=0 = no fee)
   - `versioned_transaction.py` — V0 (versioned) tx signing/serialization for swaps
   - `wallet_standard.py` — **dApp signing capability layer** (transport-agnostic):
     `sign_message`/`verify_message` (ed25519, wallet-adapter `signMessage` — refuses
@@ -414,6 +417,44 @@ If the wallet was added without a private key, an "Enter Secret" field appears o
 - **VERIFIED** headless: BURN/CLOSE instruction bytes (exact), ATA determinism,
   `get_ata_raw_amount` on W1's real Token-2022 holding (45 base units, 9 dp), and
   a fully assembled+signed burn+close tx (252-byte wire, not submitted).
+
+### Session 2026-07-16 (Priority fee slider)
+
+- **NEW** `src/solana/compute_budget.py`: the ComputeBudget program
+  (`ComputeBudget111111111111111111111111111111`) instruction builders —
+  `set_compute_unit_limit(units)` (discriminant 2 → `[2]‖u32 LE`) and
+  `set_compute_unit_price(micro_lamports)` (discriminant 3 → `[3]‖u64 LE`),
+  both account-less. `priority_fee_instructions(micro_lamports, cu_limit=None)`
+  returns `[limit, price]` (or `[]` when the price is 0/None — i.e. the default
+  "Auto"/no-priority-fee path is byte-identical to before). Priority fee charged
+  = (CUs *consumed*) × µLamports / 1e6; the unit *limit* is only a scheduling cap.
+- **NEW** `get_priority_fee_levels(mint|str, network)` in `balance.py`: percentile-based
+  Low (p25) / Medium (p50) / High (p85) / max levels from
+  `getRecentPrioritizationFees`, with safe non-zero fallbacks when the RPC fails.
+  Refactored the shared fetch into `_fetch_recent_prioritization_fees`; the legacy
+  `get_priority_fees` (max) is preserved for `calculate_total_transfer_cost`. Both
+  now accept `str` (raw address) too.
+- **CHANGED** `transfer_sol_token` (`transfer_sol.py`) and `transfer_spl_token` /
+  `burn_token` / `close_token_account` / `burn_and_close_token_account` (`spl_token.py`)
+  gained optional `priority_fee` (µLamports) + `cu_limit` params. When
+  `priority_fee`>0 the ComputeBudget instructions are prepended to the tx (limit
+  first, then price). Defaults leave existing behavior unchanged (no priority fee).
+- **NEW** UI in `src/main.py`: `make_priority_fee_block(network, account_for_fees,
+  cu_limit)` builds an Auto/Low/Medium/High/Custom selector (preset buttons +
+  custom Slider + µLamports field + live SOL estimate) and returns a state object
+  whose `get()` yields the chosen µLamports. Injected into both the SOL transfer
+  page (cu_limit=2000, fees sampled on the sender) and the SPL transfer page
+  (cu_limit=80000, fees sampled on the mint). `_pf_from_data(data)` reads the
+  selection and is passed through `transfer_sol_token` / `transfer_spl_token` /
+  the two burn actions. The selection is carried in each button's `data` dict
+  (`pf_state`/`cu_limit`), not positional indices, so the existing field-index
+  reads (amount/recipient/secret) are untouched.
+- **VERIFIED** offline: `tests/test_priority_fee.py` (exact CB instruction bytes,
+  auto=none / active=[limit,price] / no-limit=[price], SOL tx assembly). End-to-end
+  on devnet: a W1→W2 0.001 SOL transfer with `priority_fee=5000, cu_limit=2000`
+  landed `err=None`; on-chain fee = **5010 lamports** = 5000 base + 10 priority
+  (2000×5000/1e6), with both ComputeBudget instructions present and correctly
+  ordered before the System transfer.
 
 ## Security reminders
 

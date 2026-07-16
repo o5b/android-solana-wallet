@@ -120,7 +120,9 @@ async def transfer_sol_token(
     sender_private_key: str,
     recipient_address: str,
     amount: float,
-    network: str
+    network: str,
+    priority_fee: int | None = None,
+    cu_limit: int = 2000,
 ) -> dict:
     try:
         sender_kp = Keypair.from_seed(bytes.fromhex(sender_private_key))
@@ -128,6 +130,11 @@ async def transfer_sol_token(
         txn = Transaction()
         txn.recent_blockhash = await get_blockhash(network)
         txn.fee_payer = PublicKey(sender_address)
+
+        # Optional priority fee (ComputeBudget): emit limit + price first.
+        from solana.compute_budget import priority_fee_instructions
+        txn.add(*priority_fee_instructions(priority_fee, cu_limit))
+
         txn.add(
             transfer(
                 TransferParams(

@@ -352,29 +352,69 @@ async def calculate_total_transfer_cost(
     )
     return cost
 
-async def get_priority_fees(mint_pubkey: PublicKey, network: str) -> int:
-    fees = []
+async def _fetch_recent_prioritization_fees(mint_pubkey: PublicKey | str, network: str) -> list[int]:
+    """Raw per-slot prioritization fees (micro-lamports) for a mint from getRecentPrioritizationFees."""
     url = network
     headers = {"Content-Type": "application/json"}
-    payload =    {
+    payload = {
         "jsonrpc": "2.0",
         "id": 1,
         "method": "getRecentPrioritizationFees",
-        "params": [[f"{mint_pubkey}"]]
+        "params": [[f"{mint_pubkey}"]],
     }
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, headers=headers, json=payload)
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=headers, json=payload)
+    except Exception as er:
+        print(f'getRecentPrioritizationFees network error: {er}')
+        return []
 
-    if response.status_code == 200:
-        response_json = response.json()
-        if "result" in response_json:
-            fees = [fee["prioritizationFee"] for fee in response_json["result"]]
+    if response.status_code != 200:
+        print(f'getRecentPrioritizationFees bad status: {response.status_code}')
+        return []
+    response_json = response.json()
+    if "result" not in response_json:
+        print(f'getRecentPrioritizationFees no result: {response_json}')
+        return []
+    return [int(fee["prioritizationFee"]) for fee in response_json["result"]]
 
+
+async def get_priority_fees(mint_pubkey: PublicKey | str, network: str) -> int:
+    """Max recent prioritization fee (micro-lamports) for a mint (auto mode)."""
+    fees = await _fetch_recent_prioritization_fees(mint_pubkey, network)
     if not fees:
         return 1000
-    else:
-        fees.sort()
-        return int(fees[-1])
+    fees.sort()
+    return int(fees[-1])
+
+
+async def get_priority_fee_levels(mint_pubkey: PublicKey | str, network: str) -> dict:
+    """Percentile-based Low/Medium/High priority-fee levels for a mint.
+
+    Returns micro-lamports (per compute unit) derived from the recent
+    prioritization-fee distribution for the given mint's writeable accounts.
+    Falls back to safe non-zero defaults when the RPC fails or returns nothing.
+
+    Keys: ``low``, ``medium``, ``high``, ``max`` (all micro-lamports, ints >= 1).
+    """
+    fees = await _fetch_recent_prioritization_fees(mint_pubkey, network)
+    if not fees:
+        return {"low": 1_000, "medium": 5_000, "high": 25_000, "max": 25_000}
+    fees.sort()
+    n = len(fees)
+
+    def _pct(p: float) -> int:
+        idx = min(n - 1, max(0, int(round(p * (n - 1)))))
+        return max(1, int(fees[idx]))
+
+    low = _pct(0.25)
+    medium = _pct(0.50)
+    high = _pct(0.85)
+    mx = max(int(fees[-1]), 1)
+    # Keep the ladder strictly increasing and sensible.
+    high = max(high, medium + 1)
+    mx = max(mx, high)
+    return {"low": low, "medium": medium, "high": high, "max": mx}
 
 async def get_spl_token_data_from_uri(uri: str) -> dict | None:
     try:

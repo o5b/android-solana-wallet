@@ -7,6 +7,7 @@ from typing import List, Dict, Any, NamedTuple
 import pprint
 
 from solana.balance import get_account_info
+from solana.compute_budget import priority_fee_instructions
 from solana.publickey import PublicKey
 from solana.transaction import Transaction, TransactionInstruction, AccountMeta
 from solana.layouts import INSTRUCTIONS_LAYOUT, InstructionType, ACCOUNT_LAYOUT
@@ -213,7 +214,9 @@ async def transfer_spl_token(
     amount: float,
     decimals: int,
     network: str,
-    program_id: str
+    program_id: str,
+    priority_fee: int | None = None,
+    cu_limit: int = 80000,
 ) -> dict:
     try:
         sender_pubkey = PublicKey(sender_address)
@@ -274,6 +277,8 @@ async def transfer_spl_token(
         latest_blockhash = await get_blockhash(network)
 
         txn = Transaction(recent_blockhash=latest_blockhash)
+        # Optional priority fee (ComputeBudget): emit limit + price first.
+        txn.add(*priority_fee_instructions(priority_fee, cu_limit))
         if instruction_create_associated_token_account:
             txn.add(instruction_create_associated_token_account)
         txn.add(instruction_transfer)
@@ -421,6 +426,8 @@ async def burn_token(
     decimals: int,
     network: str,
     program_id: str | None = None,
+    priority_fee: int | None = None,
+    cu_limit: int = 80000,
 ) -> dict:
     """Burn `amount` (human-readable) of an SPL/Token-2022 token from the owner's ATA."""
     try:
@@ -438,6 +445,7 @@ async def burn_token(
         latest_blockhash = await get_blockhash(network)
 
         txn = Transaction(recent_blockhash=latest_blockhash, fee_payer=owner_pubkey)
+        txn.add(*priority_fee_instructions(priority_fee, cu_limit))
         txn.add(ix)
         return await _sign_send_confirm(txn, owner_keypair, network)
     except Exception as error:
@@ -451,6 +459,8 @@ async def close_token_account(
     mint_address: str,
     network: str,
     program_id: str | None = None,
+    priority_fee: int | None = None,
+    cu_limit: int = 80000,
 ) -> dict:
     """Close the owner's ATA for `mint` and refund the rent SOL to the owner.
 
@@ -468,6 +478,7 @@ async def close_token_account(
         latest_blockhash = await get_blockhash(network)
 
         txn = Transaction(recent_blockhash=latest_blockhash, fee_payer=owner_pubkey)
+        txn.add(*priority_fee_instructions(priority_fee, cu_limit))
         txn.add(ix)
         return await _sign_send_confirm(txn, owner_keypair, network)
     except Exception as error:
@@ -481,6 +492,8 @@ async def burn_and_close_token_account(
     mint_address: str,
     network: str,
     program_id: str | None = None,
+    priority_fee: int | None = None,
+    cu_limit: int = 80000,
 ) -> dict:
     """Burn the FULL on-chain balance of an ATA and then close it.
 
@@ -498,6 +511,7 @@ async def burn_and_close_token_account(
         latest_blockhash = await get_blockhash(network)
 
         txn = Transaction(recent_blockhash=latest_blockhash, fee_payer=owner_pubkey)
+        txn.add(*priority_fee_instructions(priority_fee, cu_limit))
         if raw_amount > 0:
             txn.add(burn_instruction(ata, mint_pubkey, owner_pubkey, raw_amount, program_id_pubkey))
         txn.add(close_account_instruction(ata, owner_pubkey, owner_pubkey, program_id_pubkey))
