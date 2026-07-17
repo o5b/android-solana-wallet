@@ -58,6 +58,7 @@ from ui.experience import (
     MODES,
     label as experience_label,
     description as experience_description,
+    feature,
     get_experience,
     set_experience,
     has_seen_dev_warning,
@@ -4311,6 +4312,7 @@ async def main(page: flet.Page):
             await lst_enter()
             page.views.append(stake_page)
         elif page.route == "more-page":
+            await more_enter()
             page.views.append(more_page)
         elif page.route == "settings-page":
             await settings_enter()
@@ -4655,34 +4657,57 @@ async def main(page: flet.Page):
         navigation_bar=navbar,
         horizontal_alignment=flet.CrossAxisAlignment.CENTER,
         scroll=flet.ScrollMode.AUTO,
-        controls=[
+        controls=[],  # populated by more_enter() based on the active experience mode
+    )
+
+    async def more_enter() -> None:
+        """Rebuild the More hub controls for the persisted experience mode.
+
+        Sections whose items are all gated out are omitted entirely (header +
+        divider included), so Simple mode shows only the Tools section.
+        """
+        mode = await get_experience(page)
+        controls: list = []
+
+        # WEB3 & DeFi — Pro+ only; section is skipped entirely in Simple mode.
+        web3_items = []
+        if feature("walletconnect", mode):
+            web3_items.append(_hub_item(flet.Icons.LINK, "Connect dApp",
+                                        "Pair with a dApp via WalletConnect v2 and sign requests.", nav_wc))
+        if feature("nft", mode):
+            web3_items.append(_hub_item(flet.Icons.COLLECTIONS, "NFT Gallery",
+                                        "Browse and send your non-fungible tokens.", nav_nft))
+        if feature("staking", mode):
+            web3_items.append(_hub_item(flet.Icons.SAVINGS, "Liquid Staking",
+                                        "Stake SOL into JitoSOL / mSOL / bSOL / jupSOL.", nav_stake))
+        if web3_items:
+            controls.append(flet.Text("WEB3 & DeFi", size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600))
+            controls.extend(web3_items)
+            controls.append(flet.Divider())
+
+        # Tools — always visible in every mode.
+        controls.append(flet.Text("Tools", size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600))
+        controls.append(_hub_item(flet.Icons.CONTACTS, "Address Book",
+                                  "Saved recipients with address-poisoning protection.", nav_addressbook))
+        controls.append(_hub_item(flet.Icons.SETTINGS, "Settings",
+                                  "Theme, security and app preferences.", nav_settings))
+
+        # Developer — Developer mode only.
+        if feature("devtools", mode):
+            controls.append(flet.Divider())
+            controls.append(flet.Text("Developer", size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600))
+            controls.append(_hub_item(flet.Icons.STORAGE, "Storage inspector",
+                                      "View and edit raw shared_preferences keys.", nav_dev_storage, badge="dev"))
+            controls.append(_hub_item(flet.Icons.DELETE_SWEEP_OUTLINED, "Clear all storage",
+                                      "Wipe every wallet, PIN and pairing. Irreversible.", clear_storage_click, badge="danger"))
+
+        more_page.controls = [
             flet.Column(
-                [
-                    flet.Text("WEB3 & DeFi", size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600),
-                    _hub_item(flet.Icons.LINK, "Connect dApp",
-                              "Pair with a dApp via WalletConnect v2 and sign requests.", nav_wc),
-                    _hub_item(flet.Icons.COLLECTIONS, "NFT Gallery",
-                              "Browse and send your non-fungible tokens.", nav_nft),
-                    _hub_item(flet.Icons.SAVINGS, "Liquid Staking",
-                              "Stake SOL into JitoSOL / mSOL / bSOL / jupSOL.", nav_stake),
-                    flet.Divider(),
-                    flet.Text("Tools", size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600),
-                    _hub_item(flet.Icons.CONTACTS, "Address Book",
-                              "Saved recipients with address-poisoning protection.", nav_addressbook),
-                    _hub_item(flet.Icons.SETTINGS, "Settings",
-                              "Theme, security and app preferences.", nav_settings),
-                    flet.Divider(),
-                    flet.Text("Developer", size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600),
-                    _hub_item(flet.Icons.STORAGE, "Storage inspector",
-                              "View and edit raw shared_preferences keys.", nav_dev_storage, badge="dev"),
-                    _hub_item(flet.Icons.DELETE_SWEEP_OUTLINED, "Clear all storage",
-                              "Wipe every wallet, PIN and pairing. Irreversible.", clear_storage_click, badge="danger"),
-                ],
+                controls,
                 spacing=6,
                 width=460,
             ),
-        ],
-    )
+        ]
 
     settings_page = flet.View(
         route="settings-page",

@@ -151,6 +151,11 @@ as the UI without the brittleness of Flutter automation.
 
 ## Playwright UI testing — gotchas
 
+> **Read [`info/ui-testing-playbook.md`](info/ui-testing-playbook.md) FIRST** — it is the
+> consolidated, battle-tested reference for every recurring pitfall (PIN field
+> concatenation, shared_preferences JSON-encoding + cache, Dropdown overlay, navigation).
+> The notes below are the short version.
+
 1. **Flet = Flutter web.** After `navigate`, the page only shows an "Enable accessibility"
    button. The button is outside the viewport (direct click times out). Enable semantics
    via JS once:
@@ -158,13 +163,26 @@ as the UI without the brittleness of Flutter automation.
    () => { const el = document.querySelector('flt-semantics-placeholder'); if (el) el.click(); }
    ```
    Then use `playwright_browser_snapshot` / click.
-2. **Fill text fields with `playwright_browser_type`, not `fill`/`fill_form`.** Flutter
-   textboxes ignore DOM `fill` for some fields (notably the address field). To replace an
-   existing value: click the field → `Ctrl+A` → type.
-3. The `NavigationDrawer` may open on first load → click **"Dismiss"**.
-4. Form fields are **global objects** — values persist across page navigations. Clear/replace
+2. **Fill text fields with `keyboard.type`, not `fill`/`fill_form`.** Flutter textboxes
+   ignore DOM `fill` and values **concatenate** if you fill twice. To replace an existing
+   value: click the field → `Ctrl+A` → `keyboard.type`. See playbook §3–§4.
+3. **PIN fields** are the #1 trap: filling "Create PIN" then "Confirm PIN" with `fill`
+   merges both into one field → "PINs do not match." Use the per-field keyboard pattern
+   in playbook §3. The test PIN is **`1234`**.
+4. **Flet `Dropdown` popups cannot be opened** via Playwright (mouse, keyboard, or DOM
+   events). To change a persisted setting (e.g. experience mode), set it via
+   `localStorage` and open a **new tab**. See playbook §6–§9.
+5. **shared_preferences values are JSON-encoded** in web localStorage: the app stores
+   `"pro"` as `'"pro"'` (inner quotes). A raw `setItem('...', 'pro')` is silently
+   ignored. See playbook §7.
+6. **The shared_preferences in-memory cache survives same-tab reloads.** After changing
+   `localStorage`, open a **new tab** (`browser_tabs` → `close` → `new`) —
+   `location.reload()` / `page.goto()` do NOT rebuild the cache. See playbook §7.
+7. Navigate via the **AppBar "More" action button** (top-right icon), not the navbar
+   "More" tab (unreliable). See playbook §5.
+8. Form fields are **global objects** — values persist across page navigations. Clear/replace
    before reuse.
-5. Network selection is via 3 checkboxes (mainnet-beta/testnet/devnet) on the address page.
+9. Network selection is via 3 checkboxes (mainnet-beta/testnet/devnet) on the address page.
 
 ## Test devnet wallets
 
@@ -670,7 +688,7 @@ and per-phase progress live in `info/17-06-2026_UI.md` (design) and `info/17-07-
 
 Tiered-UI redesign Phase 3 of the plan in `info/17-06-2026_UI.md` / `info/17-07-2026_UI_progress.md`.
 Introduces a persisted **Simple / Pro / Developer** mode that gates feature visibility.
-UI + a small new `src/ui/` package; the `solana/` business layer is untouched. NOT yet committed.
+UI + a small new `src/ui/` package; the `solana/` business layer is untouched. Committed (`b3b709e`).
 
 - **NEW** `src/ui/__init__.py` + `src/ui/experience.py`: pure-logic experience registry. The
   feature matrix (`_MATRIX`) is the single source of truth for which features each mode may see:
