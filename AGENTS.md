@@ -924,10 +924,95 @@ assert on the built control structure.
 **Next groups** (suggested order, each = one commit, lowest coupling first):
 1. ~~Address book (`ab_*`, poisoning gate, contact picker)~~ — **DONE** (see "Phase 7 —
    Group 1: Address book" below). 2. ~~Dev tools (sim/rpc/rawkey pages)~~ — **DONE** (see
-   "Phase 7 — Group 2: Dev tools" below, committed `651581a`). 3. NFT gallery + Liquid staking enter pages.
-   4. WalletConnect (`_wc_*`/`on_wc_*`). 5. Transfer screens (SOL/SPL, burn/close).
+   "Phase 7 — Group 2: Dev tools" below, committed `651581a`). 3. ~~NFT gallery + Liquid
+   staking enter pages~~ — **DONE** (see "Phase 7 — Group 3" below). 4. WalletConnect
+   (`_wc_*`/`on_wc_*`) — **← NEXT**. 5. Transfer screens (SOL/SPL, burn/close).
    6. Wallet cards + views (`homepage`/`more_page`/`settings_page`/`route_change`) —
    the orchestrators, done last.
+
+#### Phase 7 — Group 3: NFT gallery + Liquid staking (`enter`-style rebuilders)
+UI-only extraction (working tree, not yet committed). Lifted the NFT gallery
+(`_nft_network_tag`/`_nft_tile`/`nft_detail_click`/`nft_enter`, ~230 ln) and
+Liquid staking (`lst_enter` + positions/quote/stake/unstake, ~205 ln) out of
+`main()` into `src/ui/components/nft.py` + `src/ui/components/staking.py`.
+`main.py` 4539→4104. Plus two shared-helpers improvements: wallet-key accessors
+on `AppContext` and a canonical wallet-record loader in `ui/wallets.py`.
+- **NEW** `src/ui/wallets.py` — `load_wallets(ctx)`: JSON-decode each `wallet.<key>`
+  from `ctx.page.shared_preferences`, keep dict records with an `address_base58`,
+  never raises (→ `[]`). Replaces devtools' `_load_wallets` + the would-be
+  duplicates in nft/staking (DRY). `addressbook._gather_known_addresses` keeps its
+  own read (different `{address,label}` output shape).
+- **NEW** `src/ui/components/nft.py` — `_network_tag` (was `_nft_network_tag`),
+  `_nft_tile(nft, wallet, on_click)` (pure builder), `nft_enter(ctx, open_spl_page)`.
+  Wallets via `load_wallets`. The detail dialog's **"Send NFT"** action builds the
+  same `spl_data` dict `main.py` built inline and calls `await open_spl_page(...)`,
+  where `open_spl_page` is **`main.py`'s `_open_spl_token_page` closure injected as
+  an explicit arg** (the SPL page migrates with the transfer group; this module
+  never imports from `main.py`). `_nft_tile`'s `on_click` is the nested
+  `_detail_click` closure that captures `open_spl_page`.
+- **NEW** `src/ui/components/staking.py` — `lst_enter(ctx)`. Self-contained (quote /
+  stake / unstake / refresh-positions render inline into `ctx.controls
+  ["el_lst_page"]`; no outbound navigation). Stake/unstake sign with the wallet key
+  via **`ctx.get_wallet_private_key`/`ctx.has_wallet_private_key`**. Local `_MAINNET`
+  constant. Imports LST funcs + `LST_TOKENS`/`MAX_SLIPPAGE_BPS` from
+  `solana.liquid_staking`, `fmt_usd`/`is_valid_amount`.
+- **`AppContext`** (`ui/context.py`) gained `get_wallet_private_key(wallet)` /
+  `has_wallet_private_key(wallet)` methods (mirror of the legacy `main()` closures:
+  `""` while locked, else `get_secret(wallet, "private_key_hex", session["key"])`).
+  Added `from solana.security import get_secret` at module top.
+- **`devtools.py`** refactored: deleted its local `_load_wallets`, imports
+  `load_wallets` from `ui.wallets` (DRY — the read was identical).
+- **`main.py`**: imports `nft_enter`/`lst_enter`; **removed** now-unused
+  `from solana.nft import get_nfts`, the whole `from solana.liquid_staking import
+  (...)` block, and `InvalidOperation` from the decimal import (`Decimal`/
+  `ROUND_HALF_UP` stay — transfer amount calc; `fmt_usd`/`fmt_change` stay —
+  balance). Registers `ctx.controls["el_nft_page"]`/`["el_lst_page"]` right after
+  the two `flet.Column()` holders (the views still bind those objects). Deleted the
+  440-line NFT+LST block → one migration-marker comment. `route_change`:
+  `nft-page`→`await nft_enter(ctx, _open_spl_token_page)`;
+  `stake-page`→`await lst_enter(ctx)`.
+- **Kept in main.py** (later groups): `_open_spl_token_page` (transfer group — now
+  injected into nft_enter, still called by `go_to_spl_token_page_button_click`),
+  `MAINNET_RPC` (swap), the legacy `get_wallet_private_key`/`has_wallet_private_key`
+  closures (used by ~15 main.py sites in groups 4/5/6), `nft_page`/`stake_page`
+  `flet.View` defs, `more_enter`'s hub items.
+- **Migration-contract additions (apply to every future group)**:
+  - **Wallet-key resolution → `ctx.get_wallet_private_key`/
+    `ctx.has_wallet_private_key`.** State-derived signer-key access (unlock + Fernet)
+    is now an `AppContext` method. Extracted modules use `ctx.*`; the legacy closures
+    stay in `main.py` until their call sites migrate.
+  - **Wallet-record load → `ui.wallets.load_wallets(ctx)`.** The canonical loader;
+    don't re-inline the `wallet.` read.
+  - **Outbound navigation to a not-yet-migrated page → inject as a callback arg.**
+    When an extracted module needs to navigate to a page still in `main.py`, pass
+    the closure as an explicit argument (`nft_enter(ctx, open_spl_page)`) instead of
+    importing from `main.py`. The data-dict passed to the callback must be
+    byte-identical to what `main.py` built inline.
+- **INVARIANTS preserved**: `homepage.controls[-1]` still the wallets list;
+  `nft_page`/`stake_page` bind the same `el_*_page` objects; the `spl_data` dict
+  the NFT "Send NFT" action passes is byte-identical to before (SPL page
+  field-index reads untouched); `solana/` untouched; views built once at bootstrap
+  → `route_change` branches only gain `ctx` (+ callback); no per-session mutable
+  state in this group → no `ctx.session` migration.
+- **Key symbols** (re-grep): `src/ui/wallets.py:load_wallets`;
+  `src/ui/components/nft.py:_network_tag`/`_nft_tile`/`nft_enter`;
+  `src/ui/components/staking.py:lst_enter`; `src/ui/context.py:
+  get_wallet_private_key`/`has_wallet_private_key`; `src/main.py`: import `nft_enter`/
+  `lst_enter` (~L84), `ctx.controls["el_nft_page"]`/`["el_lst_page"]` (~L557),
+  migration marker (~L2088), route_change nft/stake branches (~L3579/L3585).
+- **VERIFIED**: `py_compile` all 7 files; `git diff --check` clean; existing offline
+  suites green (`test_address_check`/`test_sns`/`test_history_csv`/`test_spam_filter`).
+  Headless (28 checks): `load_wallets` (2 wallets + junk-filter); `ctx` wallet-key
+  accessors (unlocked True/False, locked→`""`); `nft._network_tag`;
+  `_nft_tile` (TextButton + data contract); `nft_enter` structure (7 controls,
+  wallet Dropdown + Load NFTs button, empty-wallets branch); `lst_enter` structure
+  (11 controls, LST Dropdown = 4 options + JitoSOL default, buttons, empty-wallets
+  branch); signatures. End-to-end via Playwright (Pro mode via JSON-encoded
+  localStorage + new tab; PIN `1234`; W1 watch-only): app **boots clean, 0 console
+  errors**; NFT Gallery page renders; Liquid Staking page renders; clicking
+  **Refresh Positions** runs the extracted handler end-to-end (real `lst_positions`
+  mainnet RPC → "No liquid-staking positions yet for this wallet."), 0 errors.
+
 
 #### Phase 7 — Group 2: Dev tools (`sim` / `rpc` / `raw-key` pages)
 UI-only extraction (committed `651581a`). Lifted the three Developer-layer

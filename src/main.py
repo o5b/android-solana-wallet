@@ -8,23 +8,14 @@ import base64
 import json
 import io
 import qrcode
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP
 
 from solana.create_wallet import create_solana_wallet
 from solana.balance import get_sol_spl_balance, get_sol_balance
-from solana.nft import get_nfts
 from solana.transfer_sol import transfer_sol_token, get_min_sol_balance
 # from solana.transfer_spl import transfer_spl_token
 from solana.spl_token import request_airdrop, transfer_spl_token, burn_token, close_token_account, burn_and_close_token_account
 from solana.swap import get_quote as jup_get_quote, swap as jup_swap
-from solana.liquid_staking import (
-    LST_TOKENS,
-    MAX_SLIPPAGE_BPS,
-    get_stake_quote as lst_get_quote,
-    stake_sol as lst_stake,
-    unstake_sol as lst_unstake,
-    get_lst_positions as lst_positions,
-)
 from solana.prices import enrich_balance_result_with_prices, fmt_usd, fmt_change
 from solana.spam_filter import (
     enrich_balance_result_with_spam_filter,
@@ -83,6 +74,8 @@ from ui.components.devtools import (
     build_rawkey_page,
     rawkey_enter,
 )
+from ui.components.nft import nft_enter
+from ui.components.staking import lst_enter
 
 
 def generate_qr_base64(data: str, box_size: int = 8, border: int = 2) -> str:
@@ -558,6 +551,11 @@ async def main(page: flet.Page):
     ctx.controls["el_address_book"] = el_address_book
     el_nft_page = flet.Column()
     el_lst_page = flet.Column()
+    # Register the shared controls with ctx so the extracted NFT gallery and
+    # Liquid staking modules can rebuild them (Phase 7). The `nft_page` /
+    # `stake_page` views below still bind these same objects directly.
+    ctx.controls["el_nft_page"] = el_nft_page
+    ctx.controls["el_lst_page"] = el_lst_page
     el_rawkey_page = flet.Column()
     # Register the shared control with ctx so the extracted devtools module can
     # rebuild it (Phase 7). The `raw_key_page` view below still binds this same
@@ -2087,445 +2085,12 @@ async def main(page: flet.Page):
         page.show_dialog(dlg)
 
 
-    # ===================== NFT gallery =====================
-    def _nft_network_tag(network: str) -> str:
-        if network == MAINNET_RPC:
-            return "mainnet"
-        if "testnet" in network:
-            return "testnet"
-        if "devnet" in network:
-            return "devnet"
-        return "mainnet" if network else ""
-
-    def _nft_tile(nft: dict, wallet: dict) -> flet.TextButton:
-        """A single clickable NFT thumbnail used in the gallery grid."""
-        img_src = nft.get('image') or "spl-token-placeholder.png"
-        tag = _nft_network_tag(nft.get('network'))
-        return flet.TextButton(
-            content=flet.Container(
-                width=150,
-                content=flet.Column(
-                    [
-                        flet.Image(
-                            src=img_src,
-                            width=150,
-                            height=150,
-                            fit=flet.BoxFit.COVER,
-                            border_radius=flet.border_radius.all(8),
-                        ),
-                        flet.Text(
-                            nft.get('name', 'Unnamed NFT'),
-                            size=12, weight=flet.FontWeight.BOLD,
-                            max_lines=1, overflow=flet.TextOverflow.ELLIPSIS,
-                            text_align=flet.TextAlign.CENTER,
-                        ),
-                        flet.Text(
-                            nft.get('collection') or nft.get('symbol') or tag or '',
-                            size=10, color=flet.Colors.GREY_600,
-                            max_lines=1, overflow=flet.TextOverflow.ELLIPSIS,
-                            text_align=flet.TextAlign.CENTER,
-                        ),
-                    ],
-                    spacing=2, tight=True,
-                    horizontal_alignment=flet.CrossAxisAlignment.CENTER,
-                ),
-            ),
-            data={"nft": nft, "wallet": wallet},
-            on_click=nft_detail_click,
-        )
-
-    async def nft_detail_click(e):
-        """Open a detail/preview dialog for an NFT, with a Send action."""
-        info = e.control.data
-        nft = info["nft"]
-        wallet = info["wallet"]
-
-        def _close(ev):
-            dlg.open = False
-            page.update()
-
-        async def _send(ev):
-            dlg.open = False
-            page.update()
-            if not nft.get('mint'):
-                page.show_dialog(flet.AlertDialog(title=flet.Text("This NFT has no mint address; cannot send.")))
-                return
-            spl_data = {
-                'wallet_address': wallet['address_base58'],
-                'network': nft['network'],
-                'spl_amount': nft.get('amount', 1),
-                'symbol': nft.get('symbol') or 'NFT',
-                'sol_amount': 0,
-                'raw_data': {
-                    'mint': nft['mint'],
-                    'decimals': 0,
-                    'program_id': nft.get('program_id'),
-                },
-                'wallet_data': wallet,
-                'nft_prefill_amount': 1,
-            }
-            await _open_spl_token_page(spl_data)
-
-        img_src = nft.get('image') or "spl-token-placeholder.png"
-        attr_rows = []
-        for attr in nft.get('attributes', []) or []:
-            attr_rows.append(
-                flet.Row(
-                    [
-                        flet.Text(attr.get('trait_type', '') or '', size=12, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_700),
-                        flet.Text(attr.get('value', '') or '', size=12),
-                    ],
-                    alignment=flet.MainAxisAlignment.SPACE_BETWEEN,
-                )
-            )
-        if not attr_rows:
-            attr_rows.append(flet.Text("(no traits)", size=11, italic=True, color=flet.Colors.GREY_500))
-
-        mint_row = flet.Row(
-            [
-                flet.Text(f"Mint: {_short_addr(nft.get('mint', ''))}", size=11, selectable=True, color=flet.Colors.GREY_700),
-                flet.IconButton(
-                    icon=flet.Icons.CONTENT_COPY, icon_size=16, tooltip="Copy mint",
-                    on_click=lambda ev: page.clipboard.set(nft.get('mint', '')),
-                ),
-            ],
-            alignment=flet.MainAxisAlignment.SPACE_BETWEEN,
-        )
-
-        dlg = flet.AlertDialog(
-            modal=True,
-            title=flet.Text(nft.get('name', 'Unnamed NFT'), max_lines=2, overflow=flet.TextOverflow.ELLIPSIS),
-            content=flet.Container(
-                width=340,
-                content=flet.Column(
-                    [
-                        flet.Image(
-                            src=img_src, width=300, height=300,
-                            fit=flet.BoxFit.CONTAIN,
-                            border_radius=flet.border_radius.all(10),
-                        ),
-                        flet.Text(
-                            nft.get('collection') or nft.get('symbol') or '',
-                            size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_700,
-                        ),
-                        flet.Text(f"Network: {_nft_network_tag(nft.get('network'))}   Amount: {nft.get('amount', 1)}", size=11, color=flet.Colors.GREY_600),
-                        mint_row,
-                        flet.Divider(thickness=1),
-                        flet.Text("Attributes", size=12, weight=flet.FontWeight.BOLD),
-                        *attr_rows,
-                    ] + ([flet.Text(nft['description'], size=11, selectable=True, color=flet.Colors.GREY_600)] if nft.get('description') else []),
-                    tight=True, scroll=flet.ScrollMode.AUTO, spacing=4,
-                ),
-            ),
-            actions=[
-                flet.TextButton("Close", on_click=_close),
-                flet.ElevatedButton("Send NFT", icon=flet.Icons.SEND, on_click=_send),
-            ],
-            actions_alignment=flet.MainAxisAlignment.END,
-        )
-        page.show_dialog(dlg)
-
-    async def nft_enter() -> None:
-        """(Re)build the NFT Gallery page contents into `el_nft_page`."""
-        el_nft_page.controls.clear()
-        wallets = await get_storage_data(prefix="wallet.")
-        wallets = [w for w in wallets if isinstance(w, dict) and w.get('address_base58')]
-        if not wallets:
-            el_nft_page.controls.append(
-                flet.Text("No wallets yet. Add a wallet first to view its NFTs.", size=14, color=flet.Colors.GREY_600)
-            )
-            page.update()
-            return
-
-        wallets_by_addr = {w['address_base58']: w for w in wallets}
-        wallet_dd = flet.Dropdown(
-            label="Wallet",
-            width=420,
-            options=[
-                flet.dropdown.Option(
-                    key=w['address_base58'],
-                    text=f"{w.get('name', 'Wallet')} · {_short_addr(w['address_base58'])}",
-                )
-                for w in wallets
-            ],
-            value=wallets[0]['address_base58'],
-        )
-        cb_mainnet = flet.Checkbox(label="mainnet-beta", value=True)
-        cb_testnet = flet.Checkbox(label="testnet", value=False)
-        cb_devnet = flet.Checkbox(label="devnet", value=False)
-        grid_holder = flet.Column()
-        status_txt = flet.Text(size=12, selectable=True, text_align=flet.TextAlign.CENTER)
-
-        async def _load(ev):
-            addr = wallet_dd.value
-            if not addr:
-                status_txt.value = "Pick a wallet first."
-                page.update()
-                return
-            nets = []
-            if cb_mainnet.value:
-                nets.append(MAINNET_RPC)
-            if cb_testnet.value:
-                nets.append("https://api.testnet.solana.com")
-            if cb_devnet.value:
-                nets.append("https://api.devnet.solana.com")
-            if not nets:
-                status_txt.value = "Select at least one network."
-                page.update()
-                return
-            grid_holder.controls.clear()
-            status_txt.value = ""
-            grid_holder.controls.append(
-                flet.Row([flet.ProgressRing(), flet.Text("Loading NFTs...")], alignment=flet.MainAxisAlignment.CENTER)
-            )
-            page.update()
-            try:
-                nfts = await get_nfts(addr, nets)
-            except Exception as er:
-                print(f'nft_enter load error: {er}')
-                nfts = []
-                status_txt.value = f"Error loading NFTs: {er}"
-            grid_holder.controls.clear()
-            if not nfts:
-                grid_holder.controls.append(
-                    flet.Text("No NFTs found on the selected networks.", size=13, color=flet.Colors.GREY_600)
-                )
-                if not status_txt.value:
-                    status_txt.value = ""
-            else:
-                status_txt.value = f"{len(nfts)} NFT(s) found"
-                wallet = wallets_by_addr.get(addr)
-                gallery = flet.Row(
-                    [
-                        _nft_tile(nft, wallet)
-                        for nft in nfts
-                    ],
-                    wrap=True, alignment=flet.MainAxisAlignment.CENTER,
-                    spacing=10, run_spacing=10,
-                )
-                grid_holder.controls.append(gallery)
-            page.update()
-
-        load_btn = flet.ElevatedButton("Load NFTs", icon=flet.Icons.COLLECTIONS, on_click=_load)
-
-        el_nft_page.controls.extend([
-            flet.Text("NFT Gallery", size=16, weight=flet.FontWeight.BOLD),
-            flet.Row([wallet_dd], alignment=flet.MainAxisAlignment.CENTER),
-            flet.Row([cb_mainnet, cb_testnet, cb_devnet], alignment=flet.MainAxisAlignment.CENTER),
-            flet.Row([load_btn], alignment=flet.MainAxisAlignment.CENTER),
-            flet.Row([status_txt], alignment=flet.MainAxisAlignment.CENTER),
-            flet.Divider(),
-            grid_holder,
-        ])
-        page.update()
-    # ===================== /NFT gallery =====================
-
-    # ===================== Liquid staking (SOL <-> LST via swap) =====================
-    async def lst_enter() -> None:
-        """(Re)build the Liquid Staking page contents into `el_lst_page`.
-
-        Liquid staking = swap SOL for a Liquid Staking Token (JitoSOL/mSOL/bSOL/
-        jupSOL). The LST appreciates against SOL over time — that appreciation is
-        the staking yield (no claim/withdraw instruction). Mainnet-only (Jupiter is
-        mainnet-only, like the swap screen).
-        """
-        el_lst_page.controls.clear()
-        wallets = await get_storage_data(prefix="wallet.")
-        wallets = [w for w in wallets if isinstance(w, dict) and w.get('address_base58')]
-        if not wallets:
-            el_lst_page.controls.append(
-                flet.Text("No wallets yet. Add a wallet first to use liquid staking.", size=14, color=flet.Colors.GREY_600)
-            )
-            page.update()
-            return
-
-        wallets_by_addr = {w['address_base58']: w for w in wallets}
-        wallet_dd = flet.Dropdown(
-            label="Wallet", width=420,
-            options=[flet.dropdown.Option(
-                key=w['address_base58'],
-                text=f"{w.get('name', 'Wallet')} · {_short_addr(w['address_base58'])}",
-            ) for w in wallets],
-            value=wallets[0]['address_base58'],
-        )
-        lst_dd = flet.Dropdown(
-            label="Stake into", width=260,
-            options=[flet.dropdown.Option(key=sym, text=f"{sym} · {info[2]}") for sym, info in LST_TOKENS.items()],
-            value="JitoSOL",
-        )
-        tf_amount = flet.TextField(label="Amount (SOL)", width=160, max_length=30)
-        tf_slippage = flet.TextField(label="Slippage %", value="1.0", width=100, max_length=6)
-        txt_quote = flet.Text(selectable=True, text_align=flet.TextAlign.CENTER)
-        quote_holder: dict = {"quote": None, "amount_str": None, "lst_sym": None, "slippage_bps": None}
-        positions_holder = flet.Column()
-        status_txt = flet.Text(size=12, selectable=True, text_align=flet.TextAlign.CENTER)
-
-        def _slippage_bps() -> int:
-            try:
-                pct = Decimal((tf_slippage.value or "").strip())
-            except (InvalidOperation, ValueError):
-                raise ValueError("Slippage must be a number")
-            if not pct.is_finite() or pct < Decimal("0.01") or pct > Decimal(MAX_SLIPPAGE_BPS) / 100:
-                raise ValueError(f"Slippage must be between 0.01% and {MAX_SLIPPAGE_BPS / 100:g}%")
-            return max(1, int((pct * 100).to_integral_value(rounding=ROUND_HALF_UP)))
-
-        async def _quote_click(ev):
-            try:
-                amount_str = (tf_amount.value or "").strip()
-                if not is_valid_amount(amount_str):
-                    txt_quote.value = "Invalid amount."
-                    el_lst_page.update(); return
-                slippage_bps = _slippage_bps()
-                txt_quote.value = "Fetching quote..."
-                el_lst_page.update()
-                q = await lst_get_quote(lst_dd.value, amount_str, slippage_bps=slippage_bps)
-                rate = q["sol_per_lst"]
-                rate_txt = f"  (1 {lst_dd.value} ≈ {rate:.4f} SOL — accumulated yield)" if rate else ""
-                txt_quote.value = (
-                    f"{amount_str} SOL -> {q['out_amount_lst']:.8f} {lst_dd.value}\n"
-                    f"Min received (with slippage): {q['min_out_lst']:.8f} {lst_dd.value}\n"
-                    f"Price impact: {q['price_impact_pct']:.3f}%"
-                    f"{rate_txt}"
-                )
-                quote_holder.update({"quote": q, "amount_str": amount_str, "lst_sym": lst_dd.value, "slippage_bps": slippage_bps})
-            except Exception as er:
-                txt_quote.value = f"Quote error: {er}"
-            el_lst_page.update()
-
-        async def _stake_click(ev):
-            try:
-                addr = wallet_dd.value
-                wallet = wallets_by_addr.get(addr)
-                if not has_wallet_private_key(wallet):
-                    txt_quote.value = "Staking needs the wallet's private key. Unlock the wallet or recover it with its secret."
-                    el_lst_page.update(); return
-                if (tf_amount.value or "").strip() != (quote_holder.get("amount_str") or "") \
-                        or lst_dd.value != quote_holder.get("lst_sym") \
-                        or _slippage_bps() != quote_holder.get("slippage_bps"):
-                    txt_quote.value = "Inputs changed. Press Get Quote again, then Stake SOL."
-                    el_lst_page.update(); return
-                ev.control.disabled = True
-                txt_quote.value = "Staking... please wait"
-                el_lst_page.update()
-                res = await lst_stake(
-                    lst_symbol=lst_dd.value,
-                    amount_sol=(tf_amount.value or "").strip(),
-                    signer_address=addr,
-                    private_key_hex=get_wallet_private_key(wallet),
-                    slippage_bps=_slippage_bps(),
-                    network=MAINNET_RPC,
-                )
-                conf = res.get("confirmation", {}).get("result", {}).get("value", [{}])[0]
-                status = conf.get("confirmationStatus") if conf else "unknown"
-                if conf and conf.get("err"):
-                    txt_quote.value = f"Stake FAILED: {conf['err']}\nsignature: {res['signature']}"
-                else:
-                    out = res.get("out_amount_lst")
-                    out_txt = f"\nReceived ~{out:.8f} {lst_dd.value}" if out else ""
-                    txt_quote.value = f"Stake SUCCESS ({status})!{out_txt}\nsignature: {res['signature']}"
-                await _refresh_positions()
-            except Exception as er:
-                txt_quote.value = f"Stake error: {er}"
-            finally:
-                ev.control.disabled = False
-                el_lst_page.update()
-
-        async def _refresh_positions():
-            addr = wallet_dd.value
-            if not addr:
-                return
-            positions_holder.controls.clear()
-            positions_holder.controls.append(
-                flet.Row([flet.ProgressRing(), flet.Text("Loading positions...")], alignment=flet.MainAxisAlignment.CENTER)
-            )
-            el_lst_page.update()
-            try:
-                pos = await lst_positions(addr, network=MAINNET_RPC)
-            except Exception as er:
-                positions_holder.controls.clear()
-                positions_holder.controls.append(flet.Text(f"Error loading positions: {er}", size=13, color=flet.Colors.RED_400))
-                el_lst_page.update(); return
-            positions_holder.controls.clear()
-            positions = pos.get("positions", [])
-            if not positions:
-                positions_holder.controls.append(
-                    flet.Text("No liquid-staking positions yet for this wallet.", size=13, color=flet.Colors.GREY_600)
-                )
-                el_lst_page.update(); return
-
-            wallet = wallets_by_addr.get(addr)
-            has_key = has_wallet_private_key(wallet) if wallet else False
-            for p in positions:
-                rate = p.get("sol_per_lst")
-                usd = fmt_usd(p.get("usd_value")) if p.get("usd_value") is not None else ""
-                rate_txt = f"  ·  1 {p['symbol']} ≈ {rate:.4f} SOL" if rate else ""
-                tf_unstake = flet.TextField(label=f"Unstake {p['symbol']}", width=140, max_length=30)
-
-                async def _unstake(ev, sym=p["symbol"], fld=tf_unstake):
-                    try:
-                        amt = (fld.value or "").strip()
-                        if not is_valid_amount(amt):
-                            status_txt.value = f"Invalid {sym} amount."; el_lst_page.update(); return
-                        if not (wallets_by_addr.get(wallet_dd.value) and has_wallet_private_key(wallets_by_addr[wallet_dd.value])):
-                            status_txt.value = "Unstake needs the wallet's private key. Unlock or recover the wallet."
-                            el_lst_page.update(); return
-                        ev.control.disabled = True
-                        status_txt.value = f"Unstaking {amt} {sym}..."
-                        el_lst_page.update()
-                        res = await lst_unstake(
-                            lst_symbol=sym, amount_lst=amt,
-                            signer_address=wallet_dd.value,
-                            private_key_hex=get_wallet_private_key(wallets_by_addr[wallet_dd.value]),
-                            slippage_bps=_slippage_bps(), network=MAINNET_RPC,
-                        )
-                        conf = res.get("confirmation", {}).get("result", {}).get("value", [{}])[0]
-                        if conf and conf.get("err"):
-                            status_txt.value = f"Unstake FAILED: {conf['err']}\n{res['signature']}"
-                        else:
-                            out = res.get("out_amount_sol")
-                            otxt = f" (~{out:.6f} SOL)" if out else ""
-                            status_txt.value = f"Unstake SUCCESS{otxt}\n{res['signature']}"
-                        await _refresh_positions()
-                    except Exception as er:
-                        status_txt.value = f"Unstake error: {er}"
-                    finally:
-                        ev.control.disabled = False
-                        el_lst_page.update()
-
-                positions_holder.controls.append(flet.Row([
-                    flet.Column([
-                        flet.Text(f"{p['amount']:.6f} {p['symbol']}  ({p['provider']})", weight=flet.FontWeight.BOLD),
-                        flet.Text(f"Value {usd}{rate_txt}", size=12, selectable=True),
-                    ]),
-                    tf_unstake,
-                    flet.ElevatedButton("Unstake", on_click=_unstake, disabled=not has_key),
-                ], alignment=flet.MainAxisAlignment.SPACE_BETWEEN, wrap=True))
-            el_lst_page.update()
-
-        quote_btn = flet.ElevatedButton("Get Quote", on_click=_quote_click)
-        stake_btn = flet.ElevatedButton("Stake SOL", on_click=_stake_click)
-        refresh_btn = flet.ElevatedButton("Refresh Positions", icon=flet.Icons.REFRESH, on_click=lambda ev: asyncio.ensure_future(_refresh_positions()))
-
-        el_lst_page.controls.extend([
-            flet.Text("Liquid Staking", size=16, weight=flet.FontWeight.BOLD),
-            flet.Text(
-                "Stake SOL into a Liquid Staking Token via Jupiter. The token gains value "
-                "against SOL over time — that growth is your yield. Unstake = swap back to SOL. "
-                "Mainnet only.",
-                size=12, color=flet.Colors.GREY_700, text_align=flet.TextAlign.CENTER,
-            ),
-            flet.Row([wallet_dd], alignment=flet.MainAxisAlignment.CENTER),
-            flet.Row([lst_dd], alignment=flet.MainAxisAlignment.CENTER),
-            flet.Row([tf_amount, tf_slippage], alignment=flet.MainAxisAlignment.CENTER),
-            flet.Row([quote_btn, stake_btn], alignment=flet.MainAxisAlignment.CENTER),
-            flet.Row([txt_quote], alignment=flet.MainAxisAlignment.CENTER),
-            flet.Divider(),
-            flet.Row([refresh_btn], alignment=flet.MainAxisAlignment.CENTER),
-            flet.Row([status_txt], alignment=flet.MainAxisAlignment.CENTER),
-            positions_holder,
-        ])
-        page.update()
-    # ===================== /Liquid staking =====================
+    # NFT gallery (_nft_network_tag / _nft_tile / nft_detail_click /
+    # nft_enter) + Liquid staking (lst_enter) -> moved to
+    # ui/components/nft.py + ui/components/staking.py (Phase 7).
+    # `nft_enter(ctx, _open_spl_token_page)` is wired in route_change
+    # below; wallet-key resolution is via ctx.get_wallet_private_key /
+    # ctx.has_wallet_private_key.
 
     async def go_to_token_page_button_click(e):
         print(f'****** go_to_token_page_button_click >> e.control.data: {e.control.data}')
@@ -4011,13 +3576,13 @@ async def main(page: flet.Page):
             await wc_enter_page()
             page.views.append(wc_page)
         elif page.route == "nft-page":
-            await nft_enter()
+            await nft_enter(ctx, _open_spl_token_page)
             page.views.append(nft_page)
         elif page.route == "addressbook-page":
             await addressbook_enter(ctx)
             page.views.append(addressbook_page)
         elif page.route == "stake-page":
-            await lst_enter()
+            await lst_enter(ctx)
             page.views.append(stake_page)
         elif page.route == "more-page":
             await more_enter()

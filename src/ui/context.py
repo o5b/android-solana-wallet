@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 
 import flet
 
+from solana.security import get_secret
+
 
 @dataclass
 class AppContext:
@@ -84,3 +86,23 @@ class AppContext:
         """
         dlg.open = False
         self.safe_update()
+
+    # -- wallet secrets -------------------------------------------------------
+
+    def get_wallet_private_key(self, wallet: dict) -> str:
+        """Plaintext ``private_key_hex`` for a wallet ('' if watch-only / locked).
+
+        Mirrors the legacy ``get_wallet_private_key`` closure in ``main.py``:
+        returns ``""`` while the app is locked (no in-memory Fernet key), else
+        decrypts the secret on demand via :func:`solana.security.get_secret`.
+        Widely used by the transfer / swap / liquid-staking / WalletConnect
+        flows; lives on the context so every extracted ``ui/`` module can reach
+        the signer key without reaching back into ``main.py``.
+        """
+        if not self.is_unlocked():
+            return ""
+        return get_secret(wallet, "private_key_hex", self.session["key"])
+
+    def has_wallet_private_key(self, wallet: dict) -> bool:
+        """True when a usable (decrypted) private key is available for `wallet`."""
+        return bool(self.get_wallet_private_key(wallet))

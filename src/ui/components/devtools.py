@@ -35,6 +35,7 @@ import httpx
 from solana.security import WATCH_ONLY_FIELD, decrypt_wallet_secrets
 from solana.simulation import analyze_transaction
 from ui.context import AppContext
+from ui.wallets import load_wallets
 
 #: Read-only Solana RPC endpoints keyed by the source-dropdown value.
 _ENDPOINTS = {
@@ -51,31 +52,6 @@ def _sim_row(label: str, value, color=None) -> flet.Text:
     """One labelled output row used by the simulation + RPC inspectors."""
     return flet.Text(f"{label}: {value}", size=12, selectable=True,
                      color=color or flet.Colors.BLACK87)
-
-
-async def _load_wallets(ctx: AppContext) -> list:
-    """Load the user's wallet dicts from ``shared_preferences`` (``wallet.`` keys).
-
-    Mirrors the slice of ``main.py``'s ``get_storage_data(prefix="wallet.")``
-    that ``rawkey_enter`` needs: JSON-decode each value and keep only dict
-    records with an ``address_base58``. The unused ``storage_key`` injection is
-    skipped (the raw-keys page does not need it).
-    """
-    wallets: list = []
-    try:
-        keys = await ctx.page.shared_preferences.get_keys("wallet.")
-    except Exception:
-        return wallets
-    for key in keys:
-        raw = await ctx.page.shared_preferences.get(key)
-        if isinstance(raw, str):
-            try:
-                raw = json.loads(raw)
-            except (json.JSONDecodeError, TypeError):
-                continue
-        if isinstance(raw, dict) and raw.get("address_base58"):
-            wallets.append(raw)
-    return wallets
 
 
 def _decrypt(ctx: AppContext, wallet: dict) -> dict:
@@ -404,7 +380,7 @@ async def rawkey_enter(ctx: AppContext) -> None:
     page = ctx.page
     el_rawkey_page = ctx.controls["el_rawkey_page"]
     el_rawkey_page.controls.clear()
-    wallets = await _load_wallets(ctx)
+    wallets = await load_wallets(ctx)
     if not wallets:
         el_rawkey_page.controls.append(
             flet.Text("No wallets yet. Add a wallet first.", size=14, color=flet.Colors.GREY_600)
