@@ -52,6 +52,17 @@ from solana.security import (
     decrypt_wallet_secrets,
     get_secret,
 )
+from ui.experience import (
+    SIMPLE,
+    DEVELOPER,
+    MODES,
+    label as experience_label,
+    description as experience_description,
+    get_experience,
+    set_experience,
+    has_seen_dev_warning,
+    mark_dev_warning_seen,
+)
 
 
 def generate_qr_base64(data: str, box_size: int = 8, border: int = 2) -> str:
@@ -3725,6 +3736,86 @@ async def main(page: flet.Page):
         on_change=theme_changed,
     )
 
+    # ---- Experience level (Simple / Pro / Developer) ----
+    experience_dd = flet.Dropdown(
+        label="Experience level",
+        options=[flet.dropdown.Option(key=m, text=experience_label(m)) for m in MODES],
+        value=SIMPLE,
+        dense=True,
+        on_select=lambda e: asyncio.create_task(experience_changed(e)),
+    )
+    experience_desc = flet.Text(
+        experience_description(SIMPLE), size=11, color=flet.Colors.GREY_700,
+    )
+
+    async def settings_enter() -> None:
+        """Read the persisted experience level into the Settings selector."""
+        mode = await get_experience(page)
+        experience_dd.value = mode
+        experience_desc.value = experience_description(mode)
+
+    async def _apply_experience(mode: str) -> None:
+        mode = await set_experience(page, mode)
+        experience_dd.value = mode
+        experience_desc.value = experience_description(mode)
+        page.update()
+
+    async def experience_changed(e):
+        new_mode = experience_dd.value
+        prev = await get_experience(page)
+        # Gate the first switch INTO Developer with a destructive-tool warning.
+        if (
+            new_mode == DEVELOPER
+            and prev != DEVELOPER
+            and not await has_seen_dev_warning(page)
+        ):
+            _show_dev_warning(new_mode, prev)
+            return
+        await _apply_experience(new_mode)
+
+    def _show_dev_warning(new_mode, prev_mode):
+        dlg = flet.AlertDialog(
+            modal=True,
+            title=flet.Text("Enable Developer mode?"),
+            content=flet.Column(
+                [
+                    flet.Text(
+                        "Developer mode unlocks raw, potentially destructive tools: "
+                        "the storage inspector, raw-key export, simulation details and more.",
+                        size=12,
+                    ),
+                    flet.Text(
+                        "These can expose private keys or wipe local data if misused. "
+                        "Only enable this if you know what you are doing.",
+                        size=12,
+                        color=flet.Colors.GREY_700,
+                    ),
+                ],
+                spacing=6,
+                tight=True,
+            ),
+            actions=[
+                flet.TextButton("Cancel", on_click=lambda ev: _cancel_dev_warning(dlg, prev_mode)),
+                flet.TextButton(
+                    "Enable Developer",
+                    style=flet.ButtonStyle(color=flet.Colors.RED),
+                    on_click=lambda ev: asyncio.create_task(_confirm_dev_warning(dlg, new_mode)),
+                ),
+            ],
+        )
+        page.show_dialog(dlg)
+
+    def _cancel_dev_warning(dlg, prev_mode):
+        _close_dlg(dlg)
+        # Revert the dropdown to the previously persisted mode.
+        experience_dd.value = prev_mode
+        page.update()
+
+    async def _confirm_dev_warning(dlg, mode):
+        _close_dlg(dlg)
+        await mark_dev_warning_seen(page)
+        await _apply_experience(mode)
+
     async def dev_tools_storage_list():
         lv = flet.ListView(expand=1, spacing=10, padding=20, auto_scroll=True)
         keys = await page.shared_preferences.get_keys('')
@@ -4222,6 +4313,7 @@ async def main(page: flet.Page):
         elif page.route == "more-page":
             page.views.append(more_page)
         elif page.route == "settings-page":
+            await settings_enter()
             page.views.append(settings_page)
         # else:
         #     page.views.append(homepage)
@@ -4637,12 +4729,24 @@ async def main(page: flet.Page):
                         )
                     ),
                     flet.Container(height=8),
-                    flet.Text("Experience level (coming soon)", size=13,
-                              weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600),
-                    flet.Text(
-                        "A Simple / Pro / Developer mode switch is planned for the next phase — "
-                        "it will hide advanced WEB3 and developer tools until you need them.",
-                        size=11, color=flet.Colors.GREY_600),
+                    flet.Text("Experience level", size=18, weight=flet.FontWeight.BOLD),
+                    flet.Card(
+                        content=flet.Container(
+                            padding=12,
+                            width=440,
+                            content=flet.Column(
+                                [
+                                    flet.Row(
+                                        [flet.Icon(flet.Icons.TUNE_OUTLINED), experience_dd],
+                                        alignment=flet.MainAxisAlignment.SPACE_BETWEEN,
+                                    ),
+                                    experience_desc,
+                                ],
+                                spacing=6,
+                                tight=True,
+                            ),
+                        )
+                    ),
                 ],
                 spacing=6,
                 width=460,

@@ -626,6 +626,85 @@ If the wallet was added without a private key, an "Enter Secret" field appears o
   mixed spam/clean scenario (fake-USDC→hidden, `"claim at x.com"`→hidden,
   `"Free airdrop"`→suspicious, real USDC & priced token→clean).
 
+### Session 2026-07-17 (UI reorganization — Phases 1–2)
+
+Start of a **tiered-UI redesign** (Simple / Pro / Developer experience levels). Full plan
+and per-phase progress live in `info/17-06-2026_UI.md` (design) and `info/17-07-2026_UI_progress.md`
+(hands-off / what-remains). Phases 1–2 (cleanup + More hub) are **DONE and committed**
+(`a1417c1`); Phases 3–7 remain. All changes are in `src/main.py` (UI only — `solana/` untouched).
+
+- **REMOVED** the whole `NavigationDrawer` (junk "Item 1/2" placeholders, the `selected_drawer`
+  handler, duplicate nav surface). Address Book + DevTools moved into the More hub.
+- **REMOVED** the destructive navbar "Exit" item (`page.window.destroy()` — was killing the
+  window). Navbar is now `Home | New | Recover | Add | More`; "Menu"→"Home"; fixed the
+  duplicated `CODE` icon for New/Add (New=`ADD`, Add=`LINK`); added `selected_icon` variants.
+- **NEW** `more-page` route (More hub): groups features into `WEB3 & DeFi` (Connect dApp /
+  NFT Gallery / Liquid Staking) / `Tools` (Address Book / Settings) / `Developer` (Storage
+  inspector `dev` badge / Clear all storage `danger` badge). Built by the `_hub_item(icon,
+  title, subtitle, on_click, badge="")` helper (Card with ink tap, icon+title+subtitle+chevron).
+- **NEW** `settings-page` route: hosts the `theme_control` switch (moved out of the drawer) +
+  an About block. A "Experience level (coming soon)" note reserves the spot for the Phase-3
+  Simple/Pro/Developer selector.
+- **NEW** homepage is cleaner: the three feature buttons (`connect_dapp_button` /
+  `nft_gallery_button` / `liquid_staking_button`) were removed from home and relocated to the
+  hub; AppBar relabeled `HomePage`→`Solana Wallet` and gained a `More` action icon.
+- **SAFETY** `clear_client_storage()` (wipes ALL wallets + PIN + contacts + WC pairing) was
+  previously **silent/irreversible** (drawer item called it directly). Now wrapped in
+  `clear_storage_click` → a confirmation `AlertDialog` ("Clear everything" button, red) →
+  `_do_clear_storage`. The async confirm runs via `asyncio.create_task(_do_clear_storage(dlg))`
+  in a sync lambda.
+- **FIXED** latent bug: `theme_control` label now reflects the actual loaded theme at startup
+  (was always hardcoded "Light theme").
+- Key symbols/lines in current `src/main.py`: `nav_addressbook`/`nav_dev_storage`/`clear_storage_click`
+  /`_do_clear_storage` (~3773), `selected_navbar`+`navbar` (~4181), `nav_wc`/`nav_nft`/`nav_stake`
+  /`nav_more`/`nav_settings` + `_hub_item` (~4148), `route_change` more/settings branches (~4222),
+  homepage (~4282), `more_page` (~4555), `settings_page` (~4595).
+- **INVARIANT preserved**: `route_change` does `homepage.controls[-1] = await get_wallets_cards()`
+  — after removing the 3 button rows, `get_wallets_cards()` is still the last homepage control.
+- **VERIFIED** end-to-end via Playwright (web mode, PIN `1234`): clean homepage, More hub renders
+  3 sections + badges, Settings theme toggle flips Light↔Dark with synced label, Clear-storage
+  confirm dialog works (Cancel safe), Address Book reachable via hub (was drawer-only). 0 console
+  errors. Code review (security / business-logic / dead-code tracks) = APPROVE, no findings.
+
+### Session 2026-07-17 (UI reorganization — Phase 3: Experience registry)
+
+Tiered-UI redesign Phase 3 of the plan in `info/17-06-2026_UI.md` / `info/17-07-2026_UI_progress.md`.
+Introduces a persisted **Simple / Pro / Developer** mode that gates feature visibility.
+UI + a small new `src/ui/` package; the `solana/` business layer is untouched. NOT yet committed.
+
+- **NEW** `src/ui/__init__.py` + `src/ui/experience.py`: pure-logic experience registry. The
+  feature matrix (`_MATRIX`) is the single source of truth for which features each mode may see:
+  `spl_tokens/nft/swap/staking/burn_close/walletconnect` → {Pro, Dev};
+  `devtools/raw_export/custom_rpc/csv_export/sim_detail` → {Dev}; any unlisted feature
+  (send/receive/history/addressbook/settings/wallet create/recover/add, theme) → all modes.
+  `feature(name, mode)` **fails open to all modes on an unknown feature key** (so a typo can never
+  hide e.g. Send). `normalize`/`label`/`description`, async `get_experience`/`set_experience`
+  (shared_preferences key `ui.experience`, default `"simple"`, never raise), and
+  `has_seen_dev_warning`/`mark_dev_warning_seen` (key `ui.dev_warning_seen`). Top-level package
+  `ui` imports fine because `src/` is on the path (same as `solana`/`construct`).
+- **NEW** Settings selector (`src/main.py`): the "Experience level (coming soon)" note in
+  `settings_page` is replaced with a `Dropdown` (Simple/Pro/Developer) + a dynamic description
+  `Text`. Controls `experience_dd`/`experience_desc` are defined next to `theme_control`;
+  `on_select` → `experience_changed` → `_apply_experience` (persist + update description +
+  `page.update()`). `settings_enter()` reads the persisted mode into the selector and is called by
+  `route_change` for `settings-page` (mirrors `wc_enter_page`/`nft_enter`).
+- **NEW** Developer warning: first switch **into** Developer (prev≠Developer, not seen) opens a
+  modal `AlertDialog` ("Enable Developer mode?" + destructive-tool text) — same pattern as
+  `clear_storage_click`. **Cancel** reverts the dropdown to the previously persisted mode;
+  **Enable Developer** marks `dev_warning_seen` + applies. Repeat switches skip the warning.
+- **GOTCHA** (flet 0.82.2): `Dropdown` uses **`on_select`**, not `on_change`
+  (`inspect.signature` confirms). Also a `Dropdown` merged inside a `Card` with a sibling `Text`
+  becomes one a11y button — in Playwright, to open the overlay dispatch a real
+  `PointerEvent('pointerdown'/'pointerup')` on `flt-glass-pane` at the dropdown's top-row coords,
+  then click the option button in the snapshot.
+- **INVARIANT preserved**: `homepage.controls[-1]` still the wallets list; `_apply_experience`
+  doesn't touch homepage. `settings_enter` defined before `route_change(None)`.
+- **VERIFIED** headless (matrix, get/set round-trip with a mock `page`, normalize, never-raises)
+  **and** end-to-end via Playwright (PIN `1234`): selector renders & defaults to Simple; selecting
+  Pro persists `ui.experience="pro"` + updates description; re-entering Settings reads it back;
+  first Developer pick shows the warning (Cancel reverts, Enable persists + marks seen); second
+  Developer pick skips the warning. 0 console errors. `git diff --check` clean.
+
 ## Security reminders
 
 - Private keys and mnemonics are stored **encrypted at rest** (Fernet) once a PIN is set;
