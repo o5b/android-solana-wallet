@@ -925,13 +925,13 @@ assert on the built control structure.
 1. ~~Address book (`ab_*`, poisoning gate, contact picker)~~ — **DONE** (see "Phase 7 —
    Group 1: Address book" below). 2. ~~Dev tools (sim/rpc/rawkey pages)~~ — **DONE** (see
    "Phase 7 — Group 2: Dev tools" below, committed `651581a`). 3. ~~NFT gallery + Liquid
-   staking enter pages~~ — **DONE** (see "Phase 7 — Group 3" below). 4. WalletConnect
-   (`_wc_*`/`on_wc_*`) — **← NEXT**. 5. Transfer screens (SOL/SPL, burn/close).
-   6. Wallet cards + views (`homepage`/`more_page`/`settings_page`/`route_change`) —
-   the orchestrators, done last.
+   staking enter pages~~ — **DONE** (see "Phase 7 — Group 3" below, committed `8e2e309`).
+   4. WalletConnect (`_wc_*`/`on_wc_*`) — **← NEXT**. 5. Transfer screens (SOL/SPL,
+   burn/close). 6. Wallet cards + views (`homepage`/`more_page`/`settings_page`/
+   `route_change`) — the orchestrators, done last.
 
 #### Phase 7 — Group 3: NFT gallery + Liquid staking (`enter`-style rebuilders)
-UI-only extraction (working tree, not yet committed). Lifted the NFT gallery
+UI-only extraction (committed `8e2e309`). Lifted the NFT gallery
 (`_nft_network_tag`/`_nft_tile`/`nft_detail_click`/`nft_enter`, ~230 ln) and
 Liquid staking (`lst_enter` + positions/quote/stake/unstake, ~205 ln) out of
 `main()` into `src/ui/components/nft.py` + `src/ui/components/staking.py`.
