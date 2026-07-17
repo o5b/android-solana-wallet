@@ -35,8 +35,6 @@ from solana.sns import SNSResolutionError, resolve_sns_name
 from solana.validators import is_valid_amount, is_valid_wallet_address, is_valid_private_key, is_valid_wallet_seed_phrase
 from solana.transaction_history import get_transaction_history
 from solana.history_csv import transaction_history_to_csv
-from solana.simulation import analyze_transaction
-import httpx
 from solana.security import (
     WALLET_ENCRYPTED_FIELD,
     WATCH_ONLY_FIELD,
@@ -78,6 +76,12 @@ from ui.components.addressbook import (
     open_save_contact_dialog,
     maybe_block_for_poisoning as _maybe_block_for_poisoning,
     addressbook_enter,
+)
+from ui.components.devtools import (
+    build_sim_page,
+    build_rpc_page,
+    build_rawkey_page,
+    rawkey_enter,
 )
 
 
@@ -555,6 +559,10 @@ async def main(page: flet.Page):
     el_nft_page = flet.Column()
     el_lst_page = flet.Column()
     el_rawkey_page = flet.Column()
+    # Register the shared control with ctx so the extracted devtools module can
+    # rebuild it (Phase 7). The `raw_key_page` view below still binds this same
+    # object directly.
+    ctx.controls["el_rawkey_page"] = el_rawkey_page
 
     async def delete_wallet_click(e):
         wallet = e.control.data
@@ -3579,6 +3587,9 @@ async def main(page: flet.Page):
             ),
         ],
     )
+    # Shared across every View's navigation_bar; registered so the extracted
+    # devtools (and future ui/) view builders can reference it (Phase 7).
+    ctx.controls["navbar"] = navbar
 
     # ===================== WalletConnect v2 =====================
     from solana.walletconnect import WalletConnectClient, WalletConnectError, SOLANA_CHAINS
@@ -4019,7 +4030,7 @@ async def main(page: flet.Page):
         elif page.route == "rpc-page":
             page.views.append(rpc_page)
         elif page.route == "raw-key-page":
-            await rawkey_enter()
+            await rawkey_enter(ctx)
             page.views.append(raw_key_page)
         # else:
         #     page.views.append(homepage)
@@ -4032,6 +4043,11 @@ async def main(page: flet.Page):
         print(f'########### after pop() >> page.views >> len={len(page.views)}, page.views: {page.views}')
         top_view = page.views[-1]
         await page.push_route(top_view.route)
+
+    # Shared back-navigation handler used by every View's AppBar leading button;
+    # registered so the extracted devtools (and future ui/) view builders can
+    # wire it (Phase 7).
+    ctx.controls["view_pop"] = view_pop
 
     async def nav_recover(e): await page.push_route("recover-wallet-page")
     recover_wallet_button = flet.OutlinedButton(
@@ -4195,419 +4211,16 @@ async def main(page: flet.Page):
         ]
     )
 
-    # ===================== Developer: Simulation inspector =====================
-    # Dev-only (gated by `sim_detail`). Paste a base64 transaction and run the
-    # same anti-phishing analyze_transaction() the WalletConnect flow uses, to
-    # inspect fee / programs / SOL & token deltas / warnings / logs without signing.
-    sim_out = flet.Column(spacing=4)
-    sim_net_dd = flet.Dropdown(
-        label="Network",
-        width=420,
-        value=MAINNET_RPC,
-        options=[
-            flet.dropdown.Option(key=MAINNET_RPC, text="mainnet-beta"),
-            flet.dropdown.Option(key="https://api.testnet.solana.com", text="testnet"),
-            flet.dropdown.Option(key="https://api.devnet.solana.com", text="devnet"),
-        ],
-    )
-    sim_signer_tf = flet.TextField(
-        label="Signer pubkey (optional — for relative SOL/token deltas)",
-        width=420, dense=True,
-    )
-    sim_tx_ta = flet.TextField(
-        label="Transaction (base64)",
-        width=420, min_lines=3, max_lines=6, multiline=True,
-    )
-
-    def _sim_row(label: str, value, color=None) -> flet.Text:
-        return flet.Text(f"{label}: {value}", size=12, selectable=True,
-                         color=color or flet.Colors.BLACK87)
-
-    async def sim_analyze_click(e):
-        tx_b64 = (sim_tx_ta.value or "").strip()
-        if not tx_b64:
-            sim_out.controls = [_sim_row("Error", "paste a base64 transaction first", color="red")]
-            page.update()
-            return
-        sim_out.controls = [flet.Row([flet.ProgressRing(), flet.Text("Simulating...")],
-                                     alignment=flet.MainAxisAlignment.CENTER)]
-        page.update()
-        try:
-            signer = (sim_signer_tf.value or "").strip() or None
-            res = await analyze_transaction(tx_b64, sim_net_dd.value, signer_pubkey=signer)
-        except Exception as er:
-            sim_out.controls = [_sim_row("Error", f"analyze failed: {er}", color="red")]
-            page.update()
-            return
-        sim_out.controls = []
-        status = res.get("status")
-        status_color = "green" if status == "ok" else ("red" if status == "error" else flet.Colors.ORANGE_800)
-        sim_out.controls.append(_sim_row("Status", status, color=status_color))
-        if res.get("error"):
-            sim_out.controls.append(_sim_row("Error", res["error"], color="red"))
-        if res.get("fee_sol") is not None:
-            sim_out.controls.append(_sim_row("Fee", f"{res['fee_sol']} SOL  ({res.get('fee_lamports')} lamports)"))
-        sim_out.controls.append(_sim_row("Message version", res.get("message_version")))
-        sim_out.controls.append(_sim_row("Fee payer", res.get("fee_payer")))
-        sim_out.controls.append(_sim_row("Account count", res.get("account_count")))
-        sim_out.controls.append(_sim_row("Compute units", res.get("compute_units")))
-        if res.get("programs"):
-            sim_out.controls.append(_sim_row("Programs", ", ".join(res["programs"])))
-        if res.get("unknown_programs"):
-            sim_out.controls.append(
-                _sim_row("⚠ Unverified programs", ", ".join(res["unknown_programs"]), color="red")
-            )
-        for ch in res.get("sol_changes") or []:
-            acct = str(ch.get("account", ""))
-            sim_out.controls.append(
-                _sim_row(f"SOL Δ {acct[:12]}…", f"{ch.get('delta_sol', 0):+.9f} SOL")
-            )
-        for ch in res.get("token_changes") or []:
-            acct = str(ch.get("account", ""))
-            sim_out.controls.append(
-                _sim_row(f"Token Δ {acct[:12]}…",
-                         f"{ch.get('delta_amount', '?')}  (mint {str(ch.get('mint', ''))[:10]}…)")
-            )
-        for w in res.get("warnings") or []:
-            sim_out.controls.append(_sim_row("⚠ Warning", w, color=flet.Colors.ORANGE_800))
-        logs = res.get("logs") or []
-        if logs:
-            sim_out.controls.append(flet.Text("Simulation logs:", size=11, weight=flet.FontWeight.BOLD))
-            log_controls = []
-            for log in logs:
-                lc = "red" if ("failed" in str(log).lower() or "error" in str(log).lower()) else flet.Colors.GREY_700
-                log_controls.append(flet.Text(f"• {log}", size=10, color=lc, selectable=True))
-            sim_out.controls.append(
-                flet.Container(
-                    content=flet.Column(log_controls, spacing=1, scroll=flet.ScrollMode.AUTO),
-                    height=140, padding=5,
-                    border=flet.border.all(1, "black12"), border_radius=5,
-                )
-            )
-        sim_out.controls.append(
-            flet.ElevatedButton(
-                "Copy raw JSON", icon=flet.Icons.COPY,
-                on_click=lambda ev: page.clipboard.set(json.dumps(res, indent=2, default=str)),
-            )
-        )
-        page.update()
-
-    sim_page = flet.View(
-        route="sim-page",
-        appbar=flet.AppBar(
-            title=flet.Text("Simulation inspector"),
-            color="white",
-            bgcolor="#6d28d9",
-            leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
-        ),
-        navigation_bar=navbar,
-        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
-        scroll=flet.ScrollMode.AUTO,
-        controls=[
-            flet.Text("Simulation inspector", size=18, weight=flet.FontWeight.BOLD),
-            flet.Text(
-                "Run the anti-phishing simulation on a base64 transaction WITHOUT signing. "
-                "Read-only (sigVerify=false, replaceRecentBlockhash=true).",
-                size=11, color=flet.Colors.GREY_700, text_align=flet.TextAlign.CENTER,
-            ),
-            flet.Row([sim_net_dd], alignment=flet.MainAxisAlignment.CENTER),
-            sim_signer_tf,
-            sim_tx_ta,
-            flet.Row(
-                [flet.ElevatedButton("Analyze", icon=flet.Icons.PLAY_ARROW, on_click=sim_analyze_click)],
-                alignment=flet.MainAxisAlignment.CENTER,
-            ),
-            flet.Divider(),
-            sim_out,
-        ],
-    )
-
-    # ===================== Developer: Raw RPC inspector =====================
-    # Dev-only (gated by `custom_rpc`). Run arbitrary read-only JSON-RPC calls
-    # against a chosen endpoint + commitment. No solana/ changes — direct httpx.
-    rpc_out = flet.Column(spacing=4)
-    rpc_source_dd = flet.Dropdown(
-        label="Endpoint",
-        width=420,
-        value="mainnet",
-        options=[
-            flet.dropdown.Option(key="mainnet", text="mainnet-beta"),
-            flet.dropdown.Option(key="testnet", text="testnet"),
-            flet.dropdown.Option(key="devnet", text="devnet"),
-            flet.dropdown.Option(key="custom", text="custom RPC URL"),
-        ],
-    )
-    rpc_custom_tf = flet.TextField(
-        label="Custom RPC URL (used when Endpoint = custom)",
-        width=420, dense=True, value="",
-    )
-    rpc_commit_dd = flet.Dropdown(
-        label="Commitment",
-        width=200,
-        value="confirmed",
-        options=[
-            flet.dropdown.Option(key="processed", text="processed"),
-            flet.dropdown.Option(key="confirmed", text="confirmed"),
-            flet.dropdown.Option(key="finalized", text="finalized"),
-        ],
-    )
-    rpc_method_dd = flet.Dropdown(
-        label="Method",
-        width=420,
-        value="getBalance",
-        options=[
-            flet.dropdown.Option(key="getBalance", text="getBalance (address)"),
-            flet.dropdown.Option(key="getAccountInfo", text="getAccountInfo (address)"),
-            flet.dropdown.Option(key="getTransaction", text="getTransaction (signature)"),
-            flet.dropdown.Option(key="getSignaturesForAddress", text="getSignaturesForAddress (address)"),
-            flet.dropdown.Option(key="getLatestBlockhash", text="getLatestBlockhash (no input)"),
-        ],
-    )
-    rpc_input_tf = flet.TextField(
-        label="Input (address or signature; ignored for getLatestBlockhash)",
-        width=420, dense=True,
-    )
-
-    def _rpc_endpoint() -> str:
-        src = rpc_source_dd.value
-        if src == "custom":
-            return (rpc_custom_tf.value or "").strip() or MAINNET_RPC
-        return {
-            "mainnet": MAINNET_RPC,
-            "testnet": "https://api.testnet.solana.com",
-            "devnet": "https://api.devnet.solana.com",
-        }.get(src, MAINNET_RPC)
-
-    async def rpc_run_click(e):
-        method = rpc_method_dd.value or "getBalance"
-        endpoint = _rpc_endpoint()
-        commitment = rpc_commit_dd.value or "confirmed"
-        raw_input = (rpc_input_tf.value or "").strip()
-        params: list
-        if method == "getLatestBlockhash":
-            params = [{"commitment": commitment}]
-        else:
-            params = [raw_input]
-            if method in ("getBalance", "getAccountInfo"):
-                params.append({"commitment": commitment})
-            elif method == "getSignaturesForAddress":
-                params.append({"commitment": commitment, "limit": 20})
-            elif method == "getTransaction":
-                params.append({"commitment": commitment, "maxSupportedTransactionVersion": 0})
-        rpc_out.controls = [flet.Row([flet.ProgressRing(), flet.Text(f"POST {method} …")],
-                                     alignment=flet.MainAxisAlignment.CENTER)]
-        page.update()
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(
-                    endpoint,
-                    json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
-                )
-                body = resp.text
-                try:
-                    pretty = json.dumps(resp.json(), indent=2)
-                except Exception:
-                    pretty = body
-        except Exception as er:
-            rpc_out.controls = [
-                _sim_row("Error", f"RPC failed: {er}", color="red"),
-                _sim_row("Endpoint", endpoint),
-            ]
-            page.update()
-            return
-        rpc_out.controls = [
-            _sim_row("Endpoint", endpoint),
-            _sim_row("Method", method),
-            _sim_row("HTTP status", "200 OK" if pretty != "" else "?"),
-            flet.ElevatedButton(
-                "Copy response", icon=flet.Icons.COPY,
-                on_click=lambda ev: page.clipboard.set(pretty),
-            ),
-            flet.Container(
-                content=flet.Text(pretty, selectable=True, size=10,
-                                  color=flet.Colors.GREY_900, font_family="monospace" if False else None),
-                padding=6,
-                border=flet.border.all(1, "black12"),
-                border_radius=5,
-                width=460,
-            ),
-        ]
-        page.update()
-
-    rpc_page = flet.View(
-        route="rpc-page",
-        appbar=flet.AppBar(
-            title=flet.Text("Raw RPC inspector"),
-            color="white",
-            bgcolor="#6d28d9",
-            leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
-        ),
-        navigation_bar=navbar,
-        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
-        scroll=flet.ScrollMode.AUTO,
-        controls=[
-            flet.Text("Raw RPC inspector", size=18, weight=flet.FontWeight.BOLD),
-            flet.Text(
-                "Run read-only JSON-RPC calls directly against any endpoint + commitment. "
-                "Read-only methods only — never broadcasts.",
-                size=11, color=flet.Colors.GREY_700, text_align=flet.TextAlign.CENTER,
-            ),
-            rpc_source_dd,
-            rpc_custom_tf,
-            rpc_commit_dd,
-            rpc_method_dd,
-            rpc_input_tf,
-            flet.Row(
-                [flet.ElevatedButton("Run", icon=flet.Icons.PLAY_ARROW, on_click=rpc_run_click)],
-                alignment=flet.MainAxisAlignment.CENTER,
-            ),
-            flet.Divider(),
-            rpc_out,
-        ],
-    )
-
-    # ===================== Developer: Export raw keys =====================
-    # Dev-only (gated by `raw_export`). Dedicated, warning-gated reveal of a
-    # wallet's private_key_hex / secret_key_base58 / mnemonic / public_key_hex.
-    # Secrets are already PIN-gated at rest (decrypt_for_display needs session key);
-    # this page just makes the reveal a deliberate, clearly-labelled Dev action.
-
-    async def rawkey_reveal_click(wallet: dict, field: str, out_text: flet.Text) -> None:
-        """Decrypt one secret field into the paired (initially hidden) Text control."""
-        if not is_unlocked():
-            out_text.value = "(app locked — unlock with PIN to reveal secrets)"
-            out_text.color = flet.Colors.RED
-            page.update()
-            return
-        dec = decrypt_for_display(wallet)
-        val = dec.get(field)
-        out_text.value = val if val else "(empty / not available)"
-        out_text.color = flet.Colors.BLACK87
-        page.update()
-
-    async def rawkey_copy_click(wallet: dict, field: str) -> None:
-        if not is_unlocked():
-            return
-        dec = decrypt_for_display(wallet)
-        val = dec.get(field)
-        if val:
-            await page.clipboard.set(val)
-
-    async def rawkey_enter() -> None:
-        """(Re)build the Export raw keys page into `el_rawkey_page`."""
-        el_rawkey_page.controls.clear()
-        wallets = await get_storage_data(prefix="wallet.")
-        wallets = [w for w in wallets if isinstance(w, dict) and w.get("address_base58")]
-        if not wallets:
-            el_rawkey_page.controls.append(
-                flet.Text("No wallets yet. Add a wallet first.", size=14, color=flet.Colors.GREY_600)
-            )
-            page.update()
-            return
-
-        el_rawkey_page.controls.append(
-            flet.Container(
-                content=flet.Row(
-                    [
-                        flet.Icon(flet.Icons.WARNING_AMBER, color=flet.Colors.RED),
-                        flet.Text(
-                            "These secrets grant FULL control of the wallet. Anyone with them "
-                            "can drain all funds. Never share, screenshot, or paste into untrusted apps.",
-                            size=11, color=flet.Colors.RED,
-                        ),
-                    ],
-                    spacing=8,
-                ),
-                padding=10,
-                border=flet.border.all(1, flet.Colors.RED_200),
-                border_radius=8,
-                bgcolor=flet.Colors.RED_50,
-                width=440,
-            )
-        )
-
-        for w in wallets:
-            watch_only = w.get(WATCH_ONLY_FIELD)
-            addr = w["address_base58"]
-            name = w.get("name", "Wallet")
-            rows: list = []
-            for field, label in (
-                ("private_key_hex", "Private key (hex)"),
-                ("secret_key_base58", "Secret key (base58)"),
-                ("words", "Mnemonic (12/24 words)"),
-                ("public_key_hex", "Public key (hex)"),
-            ):
-                out = flet.Text("(hidden — press Reveal)", size=12, selectable=True,
-                                color=flet.Colors.GREY_600)
-                if watch_only and field != "public_key_hex":
-                    out.value = "(watch-only wallet — no private key)"
-                    rows.append(flet.Text(f"{label}:", size=12, weight=flet.FontWeight.BOLD))
-                    rows.append(out)
-                    continue
-                rows.append(
-                    flet.Row(
-                        [
-                            flet.Text(f"{label}:", size=12, weight=flet.FontWeight.BOLD),
-                            flet.OutlinedButton(
-                                "Reveal", on_click=lambda ev, fld=field, o=out: asyncio.create_task(
-                                    rawkey_reveal_click(w, fld, o)
-                                ),
-                            ),
-                            flet.OutlinedButton(
-                                "Copy", icon=flet.Icons.COPY,
-                                on_click=lambda ev, fld=field: asyncio.create_task(
-                                    rawkey_copy_click(w, fld)
-                                ),
-                            ),
-                        ],
-                        wrap=True, spacing=6,
-                    )
-                )
-                rows.append(out)
-
-            el_rawkey_page.controls.append(
-                flet.Card(
-                    content=flet.Container(
-                        padding=12, width=440,
-                        content=flet.Column(
-                            [
-                                flet.Row(
-                                    [
-                                        flet.Text(name, size=14, weight=flet.FontWeight.BOLD),
-                                        flet.Text(
-                                            "  (watch-only)" if watch_only else "",
-                                            size=11, color=flet.Colors.ORANGE_800,
-                                        ),
-                                    ],
-                                ),
-                                flet.Text(f"Address: {addr}", size=11, selectable=True,
-                                          color=flet.Colors.GREY_700),
-                                flet.Divider(),
-                                *rows,
-                            ],
-                            spacing=4, tight=True,
-                        ),
-                    )
-                )
-            )
-        page.update()
-
-    raw_key_page = flet.View(
-        route="raw-key-page",
-        appbar=flet.AppBar(
-            title=flet.Text("Export raw keys"),
-            color="white",
-            bgcolor="#b91c1c",
-            leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
-        ),
-        navigation_bar=navbar,
-        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
-        scroll=flet.ScrollMode.AUTO,
-        controls=[
-            flet.Text("Export raw keys", size=18, weight=flet.FontWeight.BOLD, color=flet.Colors.RED_700),
-            el_rawkey_page,
-        ],
-    )
+    # =================== Developer: dev tools pages =========================
+    # Simulation inspector / Raw RPC inspector / Export raw keys -> moved to
+    # ui/components/devtools.py (Phase 7). The three Views are built once here
+    # (they reference ctx.controls["view_pop"] / ["navbar"]); rawkey_enter(ctx)
+    # rebuilds ctx.controls["el_rawkey_page"] on each visit, mirroring the
+    # address-book enter pattern. analyze_transaction / httpx now live in the
+    # devtools module, so their imports were removed from main.py.
+    sim_page = build_sim_page(ctx)
+    rpc_page = build_rpc_page(ctx)
+    raw_key_page = build_rawkey_page(ctx)
 
     wc_page = flet.View(
         route="wc-page",

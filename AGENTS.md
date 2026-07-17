@@ -922,11 +922,60 @@ re-running the underlying `solana/` function. (4) Reusable headless recipe: mock
 assert on the built control structure.
 
 **Next groups** (suggested order, each = one commit, lowest coupling first):
-1. Address book (`ab_*`, poisoning gate, contact picker) — **DONE** (see "Phase 7 —
-   Group 1: Address book" below). 2. Dev tools (sim/rpc/rawkey pages). 3. NFT gallery
-   + Liquid staking enter pages. 4. WalletConnect (`_wc_*`/`on_wc_*`). 5. Transfer
-   screens (SOL/SPL, burn/close). 6. Wallet cards + views
-   (`homepage`/`more_page`/`settings_page`/`route_change`) — the orchestrators, done last.
+1. ~~Address book (`ab_*`, poisoning gate, contact picker)~~ — **DONE** (see "Phase 7 —
+   Group 1: Address book" below). 2. ~~Dev tools (sim/rpc/rawkey pages)~~ — **DONE** (see
+   "Phase 7 — Group 2: Dev tools" below). 3. NFT gallery + Liquid staking enter pages.
+   4. WalletConnect (`_wc_*`/`on_wc_*`). 5. Transfer screens (SOL/SPL, burn/close).
+   6. Wallet cards + views (`homepage`/`more_page`/`settings_page`/`route_change`) —
+   the orchestrators, done last.
+
+#### Phase 7 — Group 2: Dev tools (`sim` / `rpc` / `raw-key` pages)
+UI-only extraction (working tree, not yet committed). Lifted the three Developer-layer
+pages (Phase 6) out of `main()` into `src/ui/components/devtools.py`. `main.py` 4926→4539.
+- **NEW** `src/ui/components/devtools.py` — `build_sim_page(ctx)`/`build_rpc_page(ctx)`/
+  `build_rawkey_page(ctx)` (each returns a `flet.View`), `rawkey_enter(ctx)` (async,
+  rebuilds `ctx.controls["el_rawkey_page"]` — mirrors Group 1's `addressbook_enter`),
+  plus helpers `_sim_row` (shared labelled row for both inspectors), `_ENDPOINTS`
+  (local mainnet/testnet/devnet URLs — no dep on main.py's `MAINNET_RPC`), `_load_wallets`
+  (reads `wallet.` records straight from `ctx.page.shared_preferences`, JSON-decode +
+  filter — no dep on `get_storage_data`), `_decrypt` (replaces the `decrypt_for_display`
+  closure: passthrough when locked, else `decrypt_wallet_secrets`). The 3 Views' AppBar
+  back button + navigation bar read `ctx.controls["view_pop"]` / `["navbar"]`.
+- **`main.py`**: imports the 4 functions; **removed** `from solana.simulation import
+  analyze_transaction` + `import httpx` (both only ever lived in the dev block — now in
+  the module); registers `ctx.controls["el_rawkey_page"]` / `["navbar"]` / `["view_pop"]`
+  (right after each definition) so the extracted builders can wire view chrome; replaced
+  the ~400-line dev block with `sim_page = build_sim_page(ctx)` / `rpc_page` /
+  `raw_key_page` (built once at bootstrap — `route_change` is untouched); `await
+  rawkey_enter(ctx)` in the `raw-key-page` branch.
+- **Migration-contract note (applies to every future view-builder group)**: shared view
+  chrome now lives in `ctx.controls` — `view_pop` (the back-nav handler) and `navbar`
+  (the shared NavigationBar) are registered there during bootstrap, so extracted view
+  builders wire them via `ctx.controls["view_pop"]` / `["navbar"]` without an explicit
+  arg. The three dev views are built once at bootstrap at the same code location as
+  before, so `route_change`'s `sim-page`/`rpc-page`/`raw-key-page` branches stay
+  byte-unchanged.
+- **Kept in main.py** (later groups): `nav_sim`/`nav_rpc`/`nav_rawkey` (nav-handler
+  group), `more_enter`'s `dev_items` + `_hub_item` (orchestrator group), `MAINNET_RPC`
+  (still used by swap/staking), `decrypt_for_display` (still used by Wallet Info dialog).
+- **INVARIANTS preserved**: `homepage.controls[-1]` still the wallets list; the 3 dev
+  Views built once at the same location; `raw_key_page` binds the same `el_rawkey_page`
+  that `rawkey_enter(ctx)` rebuilds; `solana/` untouched; existing `data`-dict contracts
+  untouched; no per-session state in this group (sim/rpc outputs are transient, rawkey
+  reveal is stateless) → no `ctx.session` migration needed.
+- **VERIFIED**: `py_compile` all 3 files; `git diff --check` clean; headless (19+ checks:
+  helpers, `_load_wallets` junk-filtering, `_decrypt` real encrypt/decrypt round-trip,
+  all 3 builders produce correct routes/controls/navbar wiring, `rawkey_enter` danger
+  banner + wallet cards + watch-only rows); Playwright (PIN `1234`, fresh instance): app
+  **boots clean, 0 console errors**, PIN setup + unlock + homepage + More hub (Simple =
+  Tools-only, WEB3/Developer absent) + Settings all render; **bootstrap logs prove
+  `build_sim_page`/`build_rpc_page` ran during live startup** (the `devtools.py` `ElevatedButton`
+  deprecation warnings only fire if the builders executed). The live *visual* render
+  behind the Developer-mode wall wasn't captured — that `Dropdown` is a CanvasKit control
+  Playwright can't drive reliably (pointer/mouse hits the merged description node, not the
+  trigger; new-tab localStorage trips a Flet type-cast error) — playbook §6/§12 fragility,
+  not a code defect; headless build is byte-identical in structure to the pre-extraction
+  code.
 
 #### Phase 7 — Group 1: Address book (`ab_*`, poisoning gate)
 UI-only extraction (committed). Lifted the whole address-book + address-poisoning
