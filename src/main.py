@@ -27,6 +27,7 @@ from solana.liquid_staking import (
 )
 from solana.prices import enrich_balance_result_with_prices, fmt_usd, fmt_change
 from solana.address_check import check_address_poisoning
+from solana.sns import SNSResolutionError, resolve_sns_name
 from solana.validators import is_valid_amount, is_valid_wallet_address, is_valid_private_key, is_valid_wallet_seed_phrase
 from solana.transaction_history import get_transaction_history
 from solana.history_csv import transaction_history_to_csv
@@ -818,6 +819,17 @@ async def main(page: flet.Page):
         )
         page.show_dialog(dlg)
         return False
+
+    async def resolve_recipient_input(recipient_raw: str, network: str) -> tuple[str, str | None]:
+        """Resolve a .sol recipient name to its wallet address when necessary."""
+        entered = (recipient_raw or "").strip()
+        if not entered.lower().endswith(".sol"):
+            return entered, None
+        try:
+            address = await resolve_sns_name(entered, network)
+        except SNSResolutionError as err:
+            raise ValueError(str(err)) from err
+        return address, f"{entered} resolved to {address}"
 
     async def addressbook_enter() -> None:
         """(Re)build the Address Book page contents into `el_address_book`."""
@@ -1955,7 +1967,8 @@ async def main(page: flet.Page):
             value=("1" if data.get('nft_prefill_amount') is not None else None),
             min_lines=1, max_lines=1, max_length=20,
         )
-        recipient_tf = flet.TextField(label="Enter the recipient's address", min_lines=1, max_lines=1, max_length=100, expand=True)
+        recipient_tf = flet.TextField(label="Recipient address or name.sol", min_lines=1, max_lines=1, max_length=100, expand=True)
+        sns_status = flet.Text(size=11, selectable=True, color=flet.Colors.BLUE_700)
         secret_tf = flet.TextField(label="Enter Secret (12/24 Words or Private Key)", min_lines=1, max_lines=1, max_length=100)
         burn_status = flet.Column()
         pf_block, pf_state = await make_priority_fee_block(data['network'], data['raw_data']['mint'], cu_limit=80000)
@@ -1996,7 +2009,8 @@ async def main(page: flet.Page):
             'cu_limit': 80000,
         }
         transfer_data = {**data, 'pf_state': pf_state, 'cu_limit': 80000,
-                         'recipient_tf': recipient_tf, 'poisoning_banner': poisoning_banner}
+                         'recipient_tf': recipient_tf, 'poisoning_banner': poisoning_banner,
+                         'sns_status': sns_status}
         burn_section = flet.Column(
             [
                 flet.Row(
@@ -2089,6 +2103,7 @@ async def main(page: flet.Page):
                     ],
                 ),
                 flet.Row([poisoning_banner]),
+                flet.Row([sns_status]),
                 burn_section,
                 pf_block,
                 flet.Row(
@@ -2113,10 +2128,19 @@ async def main(page: flet.Page):
 
     async def transfer_spl_button_click(e):
         data = e.control.data
+        recipient_input = (data.get('recipient_tf').value or "").strip() if data.get('recipient_tf') else ""
+        try:
+            recipient_address, resolution_message = await resolve_recipient_input(recipient_input, data['network'])
+        except ValueError as err:
+            page.show_dialog(flet.AlertDialog(title=flet.Text(str(err))))
+            return
+        if resolution_message:
+            data['sns_status'].value = resolution_message
+            page.update()
         # Address-poisoning gate (before disabling the button).
         _rtf = data.get('recipient_tf')
         if _rtf is not None and not await _maybe_block_for_poisoning(
-                _rtf.value, lambda: transfer_spl_button_click(e)):
+                recipient_address, lambda: transfer_spl_button_click(e)):
             return
         e.control.disabled = True
         e.control.parent.parent.controls[-1].controls.clear()
@@ -2147,7 +2171,6 @@ async def main(page: flet.Page):
                 alert_dialog_text = "Invalid secret."
 
         if private_key_hex:
-            recipient_address = e.control.parent.parent.controls[5].controls[0].value
             if is_valid_wallet_address(recipient_address):
                 transfer_amount_str = e.control.parent.parent.controls[4].controls[0].value
                 if is_valid_amount(transfer_amount_str):
@@ -2764,8 +2787,9 @@ async def main(page: flet.Page):
         pf_block, pf_state = await make_priority_fee_block(data['network'], data['wallet_address'], cu_limit=2000)
 
         recipient_tf = flet.TextField(
-            label="Enter the recipient's address", min_lines=1, max_lines=1, max_length=100, expand=True,
+            label="Recipient address or name.sol", min_lines=1, max_lines=1, max_length=100, expand=True,
         )
+        sns_status = flet.Text(size=11, selectable=True, color=flet.Colors.BLUE_700)
         poisoning_banner = make_poisoning_banner()
 
         async def _on_recipient_change(ev):
@@ -2790,6 +2814,7 @@ async def main(page: flet.Page):
         transfer_data = {
             **data, 'pf_state': pf_state, 'cu_limit': 2000,
             'recipient_tf': recipient_tf, 'poisoning_banner': poisoning_banner,
+            'sns_status': sns_status,
         }
         el_token_page.controls.extend(
             [
@@ -2851,6 +2876,7 @@ async def main(page: flet.Page):
                     ],
                 ),
                 flet.Row([poisoning_banner]),
+                flet.Row([sns_status]),
                 pf_block,
                 flet.Row(
                     [
@@ -2878,12 +2904,22 @@ async def main(page: flet.Page):
 
     async def transfer_sol_button_click(e):
         data = e.control.data
+        recipient_input = (data.get('recipient_tf').value or "").strip() if data.get('recipient_tf') else ""
+        try:
+            resolved_recipient, resolution_message = await resolve_recipient_input(recipient_input, data['network'])
+        except ValueError as err:
+            page.show_dialog(flet.AlertDialog(title=flet.Text(str(err))))
+            return
+        if resolution_message:
+            data['sns_status'].value = resolution_message
+            data['sns_status'].color = flet.Colors.BLUE_700
+            page.update()
         # print(f'****** transfer_sol_button_click >> e.control.data: {data}')
         # Address-poisoning gate (before disabling the button). On confirm it
         # re-invokes this same handler; the address is then whitelisted for the session.
         _rtf = data.get('recipient_tf')
         if _rtf is not None and not await _maybe_block_for_poisoning(
-                _rtf.value, lambda: transfer_sol_button_click(e)):
+                resolved_recipient, lambda: transfer_sol_button_click(e)):
             return
         e.control.disabled = True  # блокируем кнопку
         e.control.parent.parent.controls[-1].controls.clear()
@@ -2919,7 +2955,7 @@ async def main(page: flet.Page):
                 alert_dialog_text = "Error Secret!"
 
         if private_key_hex:
-            recipient_address = e.control.parent.parent.controls[4].controls[0].value
+            recipient_address = resolved_recipient
             # print(f'**** recipient: {recipient_address}')
             if is_valid_wallet_address(recipient_address):
 

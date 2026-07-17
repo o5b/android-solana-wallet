@@ -31,6 +31,9 @@ set (see Security below); the PIN itself is never stored. `address_base58` and
     balance + closes the ATA in one tx — the "return rent" flow)
   - `create_wallet.py` — BIP39 + BIP32-ed25519 key derivation, recovery
   - `transaction_history.py` — tx history (parallel fetch)
+  - `history_csv.py` — CSV formatter for normalized transaction history. Produces one
+    row per SOL-only transaction or per SPL token delta, with network, UTC timestamp,
+    signature, status, SOL change, fee, token data, slot/version/CU fields.
   - `swap.py` — Jupiter Swap API V2 (quote + assembled V0 tx; **mainnet-only**)
   - `prices.py` — USD price feeds via Jupiter Price API V3 (`get_prices`,
     `enrich_balance_result_with_prices`, `fmt_usd`/`fmt_change`)
@@ -98,7 +101,8 @@ set (see Security below); the PIN itself is never stored. `address_base58` and
 - `src/assets/` — images
 - `tests/` — headless/integration tests (run with `PYTHONPATH=src venv/bin/python tests/<file>.py`):
   `test_wc2_integration.py` (mock-relay WC2 protocol), `test_burn_close.py`
-  (burn/close instruction encoding + readonly devnet + opt-in destructive)
+  (burn/close instruction encoding + readonly devnet + opt-in destructive), and
+  `test_history_csv.py` (offline CSV formatting coverage)
 - `venv/` — project venv (use it for every python/flet command)
 - `devnet-wallets.txt` — test private keys (**gitignored**, see below)
 
@@ -540,6 +544,40 @@ If the wallet was added without a private key, an "Enter Secret" field appears o
   close transaction reached `confirmed` with `err=None`. Final verification found no LST
   positions and no remaining ATA for any of the four mints. The four complete tests cost
   about `0.000169586 SOL` total after returning ATA rent.
+
+### Session 2026-07-17 (CSV Transaction History Export)
+
+- **NEW** `src/solana/history_csv.py`: `transaction_history_to_csv()` formats existing
+  `transaction_history.get_transaction_history()` records as RFC-compatible CSV. It
+  emits a SOL-only row when no SPL balance changed, or one row per SPL change otherwise,
+  preserving network, UTC ISO-8601 block time, signature, transaction type/status,
+  SOL delta, fee, token mint/symbol/delta, slot, version, and compute units.
+- **NEW** UI in `src/main.py`: after history loads for one or more selected networks,
+  **Save History as CSV** opens Flet `FilePicker.save_file()` with a timestamped
+  `solana-history-YYYY-MM-DD_HH-MM-SS.csv` default name and a `.csv` extension filter.
+  The data is saved as `utf-8-sig` so Microsoft Excel recognizes UTF-8 correctly.
+  The button is omitted when no transaction history was loaded.
+- **VERIFIED** offline: `PYTHONPATH=src venv/bin/python tests/test_history_csv.py`,
+  Python syntax compilation, and `git diff --check` all pass.
+
+### Session 2026-07-17 (Solana Name Service resolution)
+
+- **NEW** `src/solana/sns.py`: safe read-only `.sol` resolver. It validates and
+  normalizes top-level names, derives the name-record PDA using the canonical SNS
+  program (`namesLPneVptA9Z5rqUDD9tMTWEJwofgaYwp8cawRkX`) and `.sol` root-domain
+  seed, obtains it with `getAccountInfo`, validates the account owner, and returns
+  the configured wallet owner. Unregistered, malformed, non-SNS, and zero-owner
+  records raise `SNSResolutionError`; SNS lookup is intentionally mainnet-only.
+- **NEW** UI in `src/main.py`: SOL and SPL transfer recipient fields accept a
+  base58 address or `name.sol`. The resolved address is displayed before transfer,
+  passed through the existing address-poisoning gate, and then used as the actual
+  recipient; the entered name remains visible in the field.
+- **NEW** `tests/test_sns.py`: offline coverage for normalization, PDA derivation
+  against the official SDK result, account decoding, wrong-program/truncated-data
+  rejection, and zero-owner rejection. Run with
+  `PYTHONPATH=src venv/bin/python tests/test_sns.py`.
+- **VERIFIED**: `test_sns.py` (11 checks), `test_address_check.py` (35 checks),
+  syntax compilation of `src/main.py` and `src/solana/sns.py`, and `git diff --check`.
 
 ## Security reminders
 
