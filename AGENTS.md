@@ -922,11 +922,55 @@ re-running the underlying `solana/` function. (4) Reusable headless recipe: mock
 assert on the built control structure.
 
 **Next groups** (suggested order, each = one commit, lowest coupling first):
-1. Address book (`ab_*`, poisoning gate, contact picker). 2. Dev tools
-(sim/rpc/rawkey pages). 3. NFT gallery + Liquid staking enter pages.
-4. WalletConnect (`_wc_*`/`on_wc_*`). 5. Transfer screens (SOL/SPL, burn/close).
-6. Wallet cards + views (`homepage`/`more_page`/`settings_page`/`route_change`) — the
-orchestrators, done last.
+1. Address book (`ab_*`, poisoning gate, contact picker) — **DONE** (see "Phase 7 —
+   Group 1: Address book" below). 2. Dev tools (sim/rpc/rawkey pages). 3. NFT gallery
+   + Liquid staking enter pages. 4. WalletConnect (`_wc_*`/`on_wc_*`). 5. Transfer
+   screens (SOL/SPL, burn/close). 6. Wallet cards + views
+   (`homepage`/`more_page`/`settings_page`/`route_change`) — the orchestrators, done last.
+
+#### Phase 7 — Group 1: Address book (`ab_*`, poisoning gate)
+UI-only extraction (committed). Lifted the whole address-book + address-poisoning
+block (~370 lines) out of `main()` into `src/ui/components/addressbook.py`.
+- **NEW** `src/ui/formatting.py` — pure `short_addr(addr, head=6, tail=6)` (was an
+  inline closure `_short_addr` in main.py; used by address book, NFT page, and
+  wallet-card dropdowns — shared now).
+- **NEW** `src/ui/components/addressbook.py` — `ab_load/save/add/delete`,
+  `_gather_known_addresses`, `make_poisoning_banner`/`update_poisoning_banner`,
+  `open_contact_picker`/`open_save_contact_dialog`, `maybe_block_for_poisoning`,
+  `addressbook_enter`. All ctx-first where they need `page`/`session`.
+  `_gather_known_addresses` reads the user's wallets directly from
+  `ctx.page.shared_preferences` under the `"wallet."` prefix (so no dependency on
+  main.py's `get_storage_data` closure). `make_poisoning_banner` is a pure builder
+  (no ctx). `resolve_recipient_input` (SNS helper) was **kept in main.py** — it
+  migrates with the transfer-screens group.
+- **`AppContext`** gained `close_dialog(dlg)` (=`dlg.open=False` + `safe_update()`)
+  — the old `_close_dlg` closure was shared by address-book dialogs AND the
+  dev-warning / clear-storage dialogs; all 4 non-AB call sites now call
+  `ctx.close_dialog(dlg)`.
+- **`main.py`** (5269→4926): imports `make_poisoning_banner`/`update_poisoning_banner`/
+  `open_contact_picker`/`open_save_contact_dialog`/`maybe_block_for_poisoning as
+  _maybe_block_for_poisoning`/`addressbook_enter` + `short_addr as _short_addr`;
+  registers `ctx.controls["el_address_book"]` on the live `el_address_book` Column
+  (the `addressbook_page` view still binds that same object); updated all call sites
+  (2 transfer pages + 4 dialog sites) to pass `ctx` / use `ctx.close_dialog`; removed
+  the now-dead `check_address_poisoning` import.
+- **Review fix (from `/review uncommitted`)**: the per-session poisoning-confirm
+  allowlist MUST live in `ctx.session["_poisoning_confirmed"]` (a `set`), NOT at
+  module level. Reason: `main()` is invoked **per connected client in web mode**, so
+  the original closure `_poisoning_confirmed` was per-session; a module-level set is
+  per-process and would bleed one client's confirmation across sessions. Verified
+  headless: session A confirms → proceeds; fresh session B blocks again.
+  **General rule for all future groups: any per-session mutable state that was a
+  closure in `main()` goes to `ctx.session`, never module-level.**
+- **INVARIANTS preserved**: `homepage.controls[-1]` still the wallets list;
+  `addressbook_page` binds the same `el_address_book`; `solana/` untouched;
+  existing `data`-dict contracts (pf_state/cu_limit/amount/recipient/secret) untouched.
+- **VERIFIED**: `py_compile` all 4 files; headless (38 checks: short_addr, storage
+  round-trip, ab_add validation, _gather_known_addresses, banner green/grey/hidden,
+  gate clean/risky/already-confirmed, picker/save dialogs, addressbook_enter rebuild,
+  close_dialog, + per-session isolation); Playwright (PIN `1234`): 0 console errors,
+  Address Book renders + add/persist contact to `flutter.addressbook.contacts`;
+  `tests/test_address_check.py` 35/35.
 
 ## Security reminders
 

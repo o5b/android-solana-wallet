@@ -74,3 +74,13 @@ class AppContext:
             self.page.update()
         except Exception:
             pass
+
+    def close_dialog(self, dlg) -> None:
+        """Close a dialog control and refresh the page.
+
+        Mirrors the legacy ``_close_dlg(dlg)`` closure: ``dlg.open = False`` then
+        a fault-tolerant ``page.update()``. Shared by the address-book dialogs and
+        the dev-warning / clear-storage dialogs still living in ``main.py``.
+        """
+        dlg.open = False
+        self.safe_update()
