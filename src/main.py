@@ -29,6 +29,7 @@ from solana.prices import enrich_balance_result_with_prices, fmt_usd, fmt_change
 from solana.address_check import check_address_poisoning
 from solana.validators import is_valid_amount, is_valid_wallet_address, is_valid_private_key, is_valid_wallet_seed_phrase
 from solana.transaction_history import get_transaction_history
+from solana.history_csv import transaction_history_to_csv
 from solana.security import (
     WALLET_ENCRYPTED_FIELD,
     WATCH_ONLY_FIELD,
@@ -78,6 +79,8 @@ async def main(page: flet.Page):
     page.title = "Solana Wallet"
     page.vertical_alignment = flet.MainAxisAlignment.CENTER
     page.horizontal_alignment = flet.CrossAxisAlignment.CENTER
+    csv_file_picker = flet.FilePicker()
+    page.services.append(csv_file_picker)
     page.bgcolor = 'white'
     page.padding = flet.Padding(top=50, left=10, right=10, bottom=10)
     # page.scroll = flet.ScrollMode.AUTO
@@ -1220,6 +1223,7 @@ async def main(page: flet.Page):
             page.update()
 
             tmp_history_result = [flet.Divider(thickness=3)]
+            csv_history = []
 
             for net_name, net_url in networks:
                 tmp_history_result.append(
@@ -1232,6 +1236,7 @@ async def main(page: flet.Page):
                 if "error" in history_data:
                     tmp_history_result.append(flet.Text(f"Error: {history_data['error']}", color="red"))
                 elif "result" in history_data and history_data["result"]:
+                    csv_history.append((net_name, history_data["result"]))
                     for tx in history_data["result"]:
                         time_str = datetime.fromtimestamp(tx['block_time']).strftime('%Y-%m-%d %H:%M:%S') if tx['block_time'] else "Unknown"
 
@@ -1336,6 +1341,40 @@ async def main(page: flet.Page):
                     tmp_history_result.append(flet.Text("No transactions found.", italic=True))
 
                 tmp_history_result.append(flet.Divider(thickness=1))
+
+            if csv_history:
+                csv_content = transaction_history_to_csv(csv_history)
+
+                async def export_history_csv_click(_):
+                    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                    saved_path = await csv_file_picker.save_file(
+                        dialog_title="Save transaction history CSV",
+                        file_name=f"solana-history-{timestamp}.csv",
+                        file_type=flet.FilePickerFileType.CUSTOM,
+                        allowed_extensions=["csv"],
+                        src_bytes=csv_content.encode("utf-8-sig"),
+                    )
+                    if saved_path:
+                        page.show_dialog(
+                            flet.AlertDialog(
+                                title=flet.Text("CSV saved"),
+                                content=flet.Text(f"Transaction history saved to:\n{saved_path}"),
+                            )
+                        )
+
+                tmp_history_result.insert(
+                    1,
+                    flet.Row(
+                        [
+                            flet.ElevatedButton(
+                                content=flet.Text("Save History as CSV"),
+                                icon=flet.Icons.DOWNLOAD,
+                                on_click=export_history_csv_click,
+                            ),
+                        ],
+                        alignment=flet.MainAxisAlignment.END,
+                    ),
+                )
 
             el_token_balance_data.controls.clear()
             el_token_balance_data.controls.extend(tmp_history_result)
