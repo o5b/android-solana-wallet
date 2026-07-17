@@ -27,6 +27,7 @@ from solana.transfer_sol import confirm_transaction
 
 JUP_API = "https://api.jup.ag/swap/v2"
 _MAINNET = "https://api.mainnet-beta.solana.com"
+_SAFE_ORDER_ATTEMPTS = 3
 
 # Program IDs permitted in a swap transaction. Any instruction referencing a
 # program outside this set is rejected before signing, so a tampered /order
@@ -86,7 +87,15 @@ async def get_order(
         resp = await client.get(f"{JUP_API}/order", params=params, headers=_HEADERS)
     if resp.status_code != 200:
         raise Exception(f"Jupiter /order failed: HTTP {resp.status_code} {resp.text[:200]}")
-    return resp.json()
+    order = resp.json()
+    # Jupiter returns some order failures (for example, insufficient funds) as
+    # HTTP 200 JSON with an empty ``transaction``. Do not let callers try to
+    # sign that empty payload and report a misleading base64/signing error.
+    if order.get("error") or order.get("errorMessage"):
+        raise Exception(f"Jupiter /order error: {order.get('errorMessage') or order['error']}")
+    if not order.get("transaction"):
+        raise Exception("Jupiter /order returned no transaction")
+    return order
 
 
 async def get_quote(
@@ -180,17 +189,24 @@ async def swap(
     Returns:
         Dict with signature, order details, and confirmation status.
     """
-    order = await get_order(input_mint, output_mint, amount, signer_address, slippage_bps)
-
-    wire = base64.b64decode(order["transaction"])
-    message = extract_message(wire)
-    version = get_message_version(message)
-
-    program_ids = set(get_instruction_program_ids(message))
-    unknown = program_ids - ALLOWED_PROGRAM_IDS
-    if unknown:
+    # Routes can change between Jupiter requests. Retry a few times when the
+    # selected route contains an untrusted program, but never sign that route.
+    # This preserves the allowlist boundary without making a safe alternative
+    # route unavailable merely because a transient route was selected first.
+    last_unknown = set()
+    for _ in range(_SAFE_ORDER_ATTEMPTS):
+        order = await get_order(input_mint, output_mint, amount, signer_address, slippage_bps)
+        wire = base64.b64decode(order["transaction"])
+        message = extract_message(wire)
+        version = get_message_version(message)
+        program_ids = set(get_instruction_program_ids(message))
+        unknown = program_ids - ALLOWED_PROGRAM_IDS
+        if not unknown:
+            break
+        last_unknown = unknown
+    else:
         raise ValueError(
-            f"order transaction contains untrusted program(s): {sorted(unknown)}; refusing to sign"
+            f"order transaction contains untrusted program(s): {sorted(last_unknown)}; refusing to sign"
         )
 
     signed_raw = sign_order_transaction(order, private_key_hex)

@@ -201,7 +201,12 @@ def parse_metadata_metaplex(data: bytes):
         metadata["error"] = er
     return metadata
 
-async def get_sol_spl_balance(address: str, networks: list) -> list:
+async def get_sol_spl_balance(
+    address: str,
+    networks: list,
+    include_transfer_cost: bool = True,
+    include_image_bytes: bool = True,
+) -> list:
     result = []
     TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
     TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
@@ -261,11 +266,12 @@ async def get_sol_spl_balance(address: str, networks: list) -> list:
                             token_data['owner'] = data['owner']
                             token_data['decimals'] = data['decimals']
 
-                            transfer_cost = await calculate_total_transfer_cost(
-                                mint_pubkey=PublicKey(mint),
-                                network=network,
-                            )
-                            token_data['transfer_cost'] = transfer_cost
+                            if include_transfer_cost:
+                                transfer_cost = await calculate_total_transfer_cost(
+                                    mint_pubkey=PublicKey(mint),
+                                    network=network,
+                                )
+                                token_data['transfer_cost'] = transfer_cost
 
                             if token_2022_program_id_metadata:
                                 token_data['name_2022'] = token_2022_program_id_metadata['name']
@@ -287,7 +293,7 @@ async def get_sol_spl_balance(address: str, networks: list) -> list:
                             elif 'uri_metaplex' in token_data and token_data['uri_metaplex']:
                                 token_data['metadata_from_uri'] = await get_spl_token_data_from_uri(uri=token_data['uri_metaplex'])
 
-                            if 'metadata_from_uri' in token_data and token_data['metadata_from_uri']:
+                            if include_image_bytes and 'metadata_from_uri' in token_data and token_data['metadata_from_uri']:
                                 if 'image' in token_data['metadata_from_uri'] and token_data['metadata_from_uri']['image']:
                                     token_data['logo'] = await get_spl_token_image(token_data['metadata_from_uri']['image'])
 

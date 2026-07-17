@@ -17,7 +17,11 @@ set (see Security below); the PIN itself is never stored. `address_base58` and
 
 - `src/main.py` — UI, route handlers, all click callbacks
 - `src/solana/` — blockchain logic:
-  - `balance.py` — SOL/SPL balances, metadata parsing, transfer-cost estimate
+  - `balance.py` — SOL/SPL balances, metadata parsing, transfer-cost estimate.
+    `get_sol_spl_balance(address, networks, include_transfer_cost=True,
+    include_image_bytes=True)` — the two optional flags skip the slow per-token
+    paths (priority-fee `calculate_total_transfer_cost` RPC + raw image-byte
+    download) that the NFT gallery (`nft.get_nfts`) doesn't need.
   - `transfer_sol.py` — SOL transfer + `confirm_transaction` (confirmation polling)
   - `spl_token.py` — SPL/Token-2022 transfer, airdrop, ATA helpers, **burn/close**:
     `burn_instruction`/`close_account_instruction` (InstructionType BURN=8 /
@@ -28,6 +32,16 @@ set (see Security below); the PIN itself is never stored. `address_base58` and
   - `create_wallet.py` — BIP39 + BIP32-ed25519 key derivation, recovery
   - `transaction_history.py` — tx history (parallel fetch)
   - `swap.py` — Jupiter Swap API V2 (quote + assembled V0 tx; **mainnet-only**)
+  - `prices.py` — USD price feeds via Jupiter Price API V3 (`get_prices`,
+    `enrich_balance_result_with_prices`, `fmt_usd`/`fmt_change`)
+  - `nft.py` — **NFT gallery data layer**: `get_nfts(address, networks)` collects an
+    address's NFTs by reusing `get_sol_spl_balance(..., include_transfer_cost=False,
+    include_image_bytes=False)` (fast — skips per-mint priority-fee RPC + raw image
+    downloads), filtering `decimals==0 && amount>=1` (same heuristic as Phantom/Solflare).
+    `_normalize_image_url` rewrites `ipfs://`→HTTPS gateway; `_normalize_attributes`
+    flattens the Metaplex traits array; `_build_nft` normalizes each NFT into
+    `{mint, network, amount, decimals, program_id, owner, name, symbol, collection,
+    image, uri, description, attributes, external_url}`. Images are returned as URLs.
   - `compute_budget.py` — ComputeBudget program ix builders for **priority fees**:
     `set_compute_unit_limit` (disc 2) / `set_compute_unit_price` (disc 3) +
     `priority_fee_instructions(price, cu_limit)` (→ `[]` when price=0 = no fee)
@@ -148,6 +162,13 @@ Private keys live in `devnet-wallets.txt` (**gitignored**). Public addresses:
 - **W2**: `EcjMVbJnNni4maBotAgtFnTqhkKkPrgGkoNtzL2MpBKr` (SOL + Token-2022)
 
 Common Token-2022 mint they both hold: `Ejxf4ZKJnyCbgHdEAkWhaR7qjGvT7vpMYxiAeWyLG62b` (9 decimals).
+
+## App unlock PIN
+
+The running app's PIN-gate PIN is **`1234`**. Use it to unlock the app (e.g. for
+Playwright UI smoke tests) without asking the user. The PIN is never stored by
+the app itself (only a scrypt salt + encrypted verifier are); this note exists
+only for local testing convenience.
 
 ## Ready-to-run operations
 
@@ -456,6 +477,70 @@ If the wallet was added without a private key, an "Enter Secret" field appears o
   (2000×5000/1e6), with both ComputeBudget instructions present and correctly
   ordered before the System transfer.
 
+### Session 2026-07-16 (NFT gallery)
+
+- **NEW** `src/solana/nft.py`: NFT gallery data layer. `get_nfts(address, networks)`
+  reuses `get_sol_spl_balance(..., include_transfer_cost=False, include_image_bytes=False)`
+  for speed (no per-mint priority-fee RPC, no raw image downloads) and filters NFTs by
+  `decimals==0 && amount>=1` (`is_nft_token` — same heuristic as Phantom/Solflare).
+  `_build_nft` normalizes each holding into
+  `{mint, network, amount, decimals, program_id, owner, name, symbol, collection, image,
+  uri, description, attributes, external_url}`. `_normalize_image_url` rewrites
+  `ipfs://`/`ipfs://ipfs/` → `https://ipfs.io/ipfs/` (Arweave/https pass through);
+  `_normalize_attributes` flattens the Metaplex traits array (incl. nested-object values);
+  `_collection_name` resolves a label from metadata JSON or on-chain symbol. Never raises
+  — a failing network/token is skipped; hard balance-fetch failure returns `[]`.
+- **CHANGED** `get_sol_spl_balance` (`balance.py`): gained optional `include_transfer_cost`
+  (default `True`) and `include_image_bytes` (default `True`) flags. When `False`, the
+  per-token `calculate_total_transfer_cost` priority-fee RPC call and the
+  `get_spl_token_image` raw-byte download are skipped respectively. Existing callers
+  (balance screen) are unchanged; the NFT gallery passes both as `False`.
+- **NEW** UI in `src/main.py`: "NFT Gallery" button on the homepage → `nft-page`.
+  `nft_enter()` builds a wallet `Dropdown` + mainnet/testnet/devnet checkboxes + "Load
+  NFTs" button → `get_nfts` → `Row(wrap=True)` grid of clickable tiles (thumbnail +
+  name + collection/network tag). `nft_detail_click` opens a modal dialog (image,
+  collection, network+amount, copyable mint, Attributes traits, description) with a
+  "Send NFT" action. Sending reuses the existing SPL transfer flow: `_open_spl_token_page`
+  was extracted from `go_to_spl_token_page_button_click` (so it can be called with a
+  data dict directly), and the SPL page now honors `data['nft_prefill_amount']` to
+  prefill the amount field ("1" for an NFT). Watch-only wallets get the usual one-time
+  secret field. The existing transfer/burn/priority-fee machinery is reused unchanged.
+- **VERIFIED** headless: `get_nfts` on W1 finds the real devnet NFT `SuperNFT7`
+  (Token-2022, decimals 0, amount 1) with correct name/symbol/image-URL/attributes; the
+  `is_nft_token`/`_build_nft`/IPFS/attribute helpers pass offline unit checks. UI smoke
+  test (Playwright): gallery page renders, Load finds the NFT, detail dialog shows all
+  metadata (name/collection/network/amount/mint/attributes), and "Send NFT" navigates to
+  the SPL transfer page with amount prefilled to "1".
+
+### Session 2026-07-17 (Liquid Staking)
+
+- **NEW** `src/solana/liquid_staking.py`: curated, anti-phishing mainnet registry for
+  `JitoSOL`, `mSOL`, `bSOL`, and `jupSOL`. `stake_sol` / `unstake_sol` wrap the existing
+  Jupiter flow for `SOL -> LST` / `LST -> SOL`; `get_stake_quote` supplies expected and
+  minimum output plus the SOL-per-LST rate; `get_lst_positions` aggregates the wallet's
+  classic-SPL and Token-2022 token accounts, then prices recognized LSTs in USD. The
+  module strictly requires mainnet-beta, exact base-unit amounts (no float rounding), and
+  slippage in `1..500` bps.
+- **NEW** UI in `src/main.py`: the homepage's **Liquid Staking** button opens
+  `stake-page`, where a wallet and LST can be selected, a quote acquired, and stake or
+  unstake executed. Positions can be refreshed and each position provides an amount field
+  for unstaking. The quote is invalidated when the amount, LST, or slippage changes.
+- **HARDENED** `swap.swap`: Jupiter can choose a different DEX route for each `/order`
+  request. An order containing a program outside `ALLOWED_PROGRAM_IDS` is never signed;
+  the wallet fetches up to three fresh orders looking for an allowlisted route, then
+  refuses if none is safe. Jupiter's HTTP-200 application errors (such as insufficient
+  funds with an empty transaction) now produce an actionable error instead of a signing
+  failure.
+- **NEW** `tests/test_liquid_staking.py`: offline coverage for the curated registry,
+  exact amount and slippage guards, quote/stake/unstake adapters, LST positions, Jupiter
+  application errors, and the safe-route retry behavior. Run with
+  `PYTHONPATH=src venv/bin/python tests/test_liquid_staking.py`.
+- **VERIFIED mainnet**: full `0.01 SOL -> LST -> SOL` round-trips completed for all four
+  curated LSTs: JitoSOL, mSOL, bSOL, and jupSOL. Every stake, unstake, and empty-ATA
+  close transaction reached `confirmed` with `err=None`. Final verification found no LST
+  positions and no remaining ATA for any of the four mints. The four complete tests cost
+  about `0.000169586 SOL` total after returning ATA rent.
+
 ## Security reminders
 
 - Private keys and mnemonics are stored **encrypted at rest** (Fernet) once a PIN is set;
@@ -463,5 +548,7 @@ If the wallet was added without a private key, an "Enter Secret" field appears o
   them unless explicitly required for a test.
 - The PIN is never stored; only a salt + encrypted verifier token are. Losing the PIN makes
   encrypted secrets unrecoverable (the only option is "Forgot PIN?" → wipe all wallets).
-- `devnet-wallets.txt` is gitignored. Keep any real keys out of the repo.
-- These wallets hold **devnet** funds only (no real value).
+- `devnet-wallets.txt` and `mainnet-wallets.txt` are gitignored. Keep all keys out of the
+  repo and use a mainnet key only after the user explicitly authorizes a real transaction.
+- Devnet wallets hold no real value; `mainnet-wallets.txt` contains real keys and must
+  never be logged, printed, or copied into source files.
