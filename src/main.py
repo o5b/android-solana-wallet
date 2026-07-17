@@ -26,6 +26,11 @@ from solana.liquid_staking import (
     get_lst_positions as lst_positions,
 )
 from solana.prices import enrich_balance_result_with_prices, fmt_usd, fmt_change
+from solana.spam_filter import (
+    enrich_balance_result_with_spam_filter,
+    is_hidden_spam,
+    is_suspicious,
+)
 from solana.address_check import check_address_poisoning
 from solana.sns import SNSResolutionError, resolve_sns_name
 from solana.validators import is_valid_amount, is_valid_wallet_address, is_valid_private_key, is_valid_wallet_seed_phrase
@@ -1437,11 +1442,26 @@ async def main(page: flet.Page):
                 print(f'price enrichment skipped: {price_er}')
                 price_info = {"total_usd": 0.0, "priced": 0, "tokens": 0, "mainnet": False}
 
+            # Spam / scam token filter. Runs AFTER pricing so it can use the
+            # real-market-liquidity signal (token['usd_price']) to downgrade an
+            # isolated open-mint-authority hit. Hides confirmed spam, badges
+            # suspicious tokens. Never breaks balance display on failure.
+            try:
+                spam_info = await enrich_balance_result_with_spam_filter(result)
+                print(f'****** spam_info: {spam_info}')
+            except Exception as spam_er:
+                print(f'spam enrichment skipped: {spam_er}')
+                spam_info = {"spam": 0, "suspicious": 0, "flagged": 0, "total": 0}
+
             for i, r in enumerate(result):
                 tmp_balance_spl = []
-                for spl_token in r['spl']:
-                    if spl_token['amount'] <= 0:
-                        continue
+                tmp_spam_spl = []
+                spam_token_count = 0
+
+                # Builds the (Transfer button + logo + amount text) + expand
+                # detail row pair for one token. Defined per-network so it can
+                # close over `wallet` and the current `r` without late-binding.
+                def _build_spl_token_controls(spl_token):
                     token_symbol = ''
                     if 'symbol_metaplex' in spl_token:
                         token_symbol += f'{spl_token['symbol_metaplex']} (symbol_metaplex) '
@@ -1451,21 +1471,9 @@ async def main(page: flet.Page):
                         width=100,
                         height=100,
                         src="spl-token-placeholder.png",
-                        # fit=flet.ImageFit.CONTAIN,
                         fit=flet.BoxFit.CONTAIN,
                         border_radius=flet.border_radius.all(10),
                     )
-                    # image_base64 = ''
-                    # if 'logo' in spl_token and spl_token['logo']:
-                    #     # Конвертируем байты в base64-строку
-                    #     try:
-                    #         image_base64 = base64.b64encode(spl_token['logo']).decode("utf-8")
-                    #     except Exception as er:
-                    #         print(f'Error при конвертации байтов изображения в base64-строку. Msg: {er}')
-                    # if image_base64:
-                    #     spl_token_logo.src_base64 = image_base64
-                    # else:
-                    #     spl_token_logo.src = "spl-token-placeholder.png"
                     if 'logo' in spl_token and spl_token['logo']:
                         spl_token_logo.src = spl_token['logo']
                     # USD value spans (mainnet-priced tokens only)
@@ -1484,65 +1492,112 @@ async def main(page: flet.Page):
                                     color=flet.Colors.GREEN if _chg >= 0 else flet.Colors.RED,
                                 ),
                             ))
-                    tmp_balance_spl.extend(
-                        [
+                    return [
+                        flet.Row(
+                            [
+                                flet.ElevatedButton(
+                                    content=flet.Text("Transfer this token"),
+                                    on_click=go_to_spl_token_page_button_click,
+                                    data={
+                                        'wallet_address': wallet['address_base58'],
+                                        'network': r['network'],
+                                        'spl_amount': spl_token['amount'],
+                                        'symbol': token_symbol,
+                                        'sol_amount': r['sol'],
+                                        'raw_data': spl_token,
+                                        'wallet_data': wallet,
+                                    },
+                                    # disabled=False if (r['sol'] and spl_token['amount']) else True,
+                                    disabled=False if (r['sol'] and spl_token['amount'] and r['sol'] > spl_token['transfer_cost']["total_sol"]) else True,
+                                ),
+                                spl_token_logo,
+                                flet.Text(
+                                    value='',
+                                    spans=[
+                                        flet.TextSpan(f'{spl_token['amount']}', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
+                                        flet.TextSpan(f' {token_symbol}', flet.TextStyle(size=16)),
+                                        *_spl_usd_spans,
+                                    ]
+                                ),
+                            ],
+                        ),
+                        flet.Column(
+                            [
+                                flet.Row(
+                                    [
+                                        flet.TextButton(
+                                            content=flet.Row(
+                                                [
+                                                    flet.Icon(flet.Icons.ARROW_DROP_DOWN, size=50),
+                                                ],
+                                            ),
+                                            on_click=spl_token_arrow_drop_down_button_click,
+                                            data={k: v for k, v in spl_token.items() if k not in ('logo', 'spam')},
+                                        ),
+                                    ],
+                                    alignment=flet.MainAxisAlignment.CENTER,
+                                ),
+                            ],
+                        ),
+                    ]
+
+                for spl_token in r['spl']:
+                    if spl_token['amount'] <= 0:
+                        continue
+                    # Confirmed-spam tokens are hidden behind a toggle; they
+                    # can still be inspected/shown, but don't clutter the list.
+                    if is_hidden_spam(spl_token):
+                        spam_token_count += 1
+                        tmp_spam_spl.extend(_build_spl_token_controls(spl_token))
+                        continue
+                    # Suspicious (not confirmed) tokens stay visible but are
+                    # badged with the detection reasons so the user is warned.
+                    if is_suspicious(spl_token):
+                        _sv = spl_token.get('spam') or {}
+                        _reasons = ', '.join(_sv.get('reasons') or []) or 'flagged as risky'
+                        tmp_balance_spl.append(
                             flet.Row(
                                 [
-                                    flet.ElevatedButton(
-                                        content=flet.Text("Transfer this token"),
-                                        on_click=go_to_spl_token_page_button_click,
-                                        data={
-                                            'wallet_address': wallet['address_base58'],
-                                            'network': r['network'],
-                                            'spl_amount': spl_token['amount'],
-                                            'symbol': token_symbol,
-                                            'sol_amount': r['sol'],
-                                            'raw_data': spl_token,
-                                            'wallet_data': wallet,
-                                        },
-                                        # disabled=False if (r['sol'] and spl_token['amount']) else True,
-                                        disabled=False if (r['sol'] and spl_token['amount'] and r['sol'] > spl_token['transfer_cost']["total_sol"]) else True,
-                                    ),
-                                    spl_token_logo,
-                                    flet.Text(
-                                        value='',
-                                        spans=[
-                                            flet.TextSpan(f'{spl_token['amount']}', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
-                                            flet.TextSpan(f' {token_symbol}', flet.TextStyle(size=16)),
-                                            *_spl_usd_spans,
-                                        ]
-                                    ),
+                                    flet.Icon(flet.Icons.WARNING_AMBER_ROUNDED, color=flet.Colors.ORANGE, size=18),
+                                    flet.Text(f'Suspicious: {_reasons}', size=12, color=flet.Colors.ORANGE_800, selectable=True),
                                 ],
+                            )
+                        )
+                    tmp_balance_spl.extend(_build_spl_token_controls(spl_token))
+
+                # "N spam tokens hidden" expander. Hidden rows live in a column
+                # that is shown on demand; the toggle carries the column ref in
+                # its `data` so the handler needs no per-loop closure state.
+                if tmp_spam_spl:
+                    _spam_col = flet.Column(controls=tmp_spam_spl, visible=False)
+
+                    async def _toggle_spam(e):
+                        col = e.control.data
+                        col.visible = not col.visible
+                        await page.update()
+
+                    tmp_balance_spl.extend([
+                        flet.Container(
+                            content=flet.TextButton(
+                                on_click=_toggle_spam,
+                                data=_spam_col,
+                                content=flet.Row(
+                                    [
+                                        flet.Icon(flet.Icons.WARNING, color=flet.Colors.RED, size=18),
+                                        flet.Text(
+                                            f'{spam_token_count} spam token(s) hidden — click to show',
+                                            size=12, color=flet.Colors.RED,
+                                        ),
+                                    ],
+                                ),
                             ),
-                            # flet.Row(
-                            #     scroll=flet.ScrollMode.AUTO,
-                            #     controls=[
-                            #         flet.Text(
-                            #             value=f'{spl_token}',
-                            #             size=12,
-                            #         ),
-                            #     ],
-                            # ),
-                            flet.Column(
-                                [
-                                    flet.Row(
-                                        [
-                                            flet.TextButton(
-                                                content=flet.Row(
-                                                    [
-                                                        flet.Icon(flet.Icons.ARROW_DROP_DOWN, size=50),
-                                                    ],
-                                                ),
-                                                on_click=spl_token_arrow_drop_down_button_click,
-                                                data={k: v for k, v in spl_token.items() if k != 'logo'},
-                                            ),
-                                        ],
-                                        alignment=flet.MainAxisAlignment.CENTER,
-                                    ),
-                                ],
-                            ),
-                        ]
-                    )
+                            padding=flet.padding.symmetric(vertical=2, horizontal=8),
+                            margin=flet.margin.only(top=4, bottom=4),
+                            bgcolor=flet.Colors.with_opacity(0.08, flet.Colors.RED),
+                            border_radius=flet.border_radius.all(8),
+                        ),
+                        _spam_col,
+                    ])
                 tmp_request_airdrop = []
                 if r['network'] == "https://api.testnet.solana.com" or r['network'] == "https://api.devnet.solana.com":
                     tmp_request_airdrop.append(
@@ -1656,6 +1711,33 @@ async def main(page: flet.Page):
                 )
                 if _note:
                     _balance_controls.append(flet.Text(_note.strip(), size=12, color=flet.Colors.GREY_500))
+            # Spam-filter summary banner (when anything was flagged). Spam
+            # tokens are hidden behind per-network toggles; suspicious tokens
+            # are shown with an inline badge. This banner makes the filtering
+            # visible even before the user scrolls to a token list.
+            if spam_info.get('flagged'):
+                _spam_txt = []
+                if spam_info.get('spam'):
+                    _spam_txt.append(f"{spam_info['spam']} spam hidden")
+                if spam_info.get('suspicious'):
+                    _spam_txt.append(f"{spam_info['suspicious']} suspicious")
+                _balance_controls.append(
+                    flet.Container(
+                        content=flet.Row(
+                            [
+                                flet.Icon(flet.Icons.SHIELD_OUTLINED, color=flet.Colors.RED_700, size=18),
+                                flet.Text(
+                                    f"Spam filter: {' / '.join(_spam_txt)}",
+                                    size=12, color=flet.Colors.RED_700, selectable=True,
+                                ),
+                            ],
+                        ),
+                        padding=flet.padding.symmetric(vertical=4, horizontal=10),
+                        margin=flet.margin.only(bottom=6),
+                        bgcolor=flet.Colors.with_opacity(0.06, flet.Colors.RED),
+                        border_radius=flet.border_radius.all(10),
+                    )
+                )
             _balance_controls.extend(tmp_balance_result)
             el_token_balance_data.controls.extend(_balance_controls)
             e.control.disabled = False  # разблокируем кнопку

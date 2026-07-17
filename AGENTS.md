@@ -37,6 +37,14 @@ set (see Security below); the PIN itself is never stored. `address_base58` and
   - `swap.py` — Jupiter Swap API V2 (quote + assembled V0 tx; **mainnet-only**)
   - `prices.py` — USD price feeds via Jupiter Price API V3 (`get_prices`,
     `enrich_balance_result_with_prices`, `fmt_usd`/`fmt_change`)
+  - `spam_filter.py` — **spam / scam token filter** (balance screen). Classifies each
+    `get_sol_spl_balance` token as `spam`/`suspicious`/`clean` via curated
+    `KNOWN_GOOD_MINTS`/`KNOWN_SPAM_MINTS` registries, symbol **impersonation**, suspicious
+    text (URL/bait words), and on-chain `mintAuthority`/`freezeAuthority` risk
+    (`get_mint_authorities` batches all mints of a network in one `getMultipleAccountsInfo`).
+    `enrich_balance_result_with_spam_filter` mutates tokens in place (`token['spam']`) and
+    runs AFTER `prices.py` so a real Jupiter `usd_price` (liquidity) downgrades an isolated
+    open-mint hit to clean. Never raises.
   - `nft.py` — **NFT gallery data layer**: `get_nfts(address, networks)` collects an
     address's NFTs by reusing `get_sol_spl_balance(..., include_transfer_cost=False,
     include_image_bytes=False)` (fast — skips per-mint priority-fee RPC + raw image
@@ -578,6 +586,45 @@ If the wallet was added without a private key, an "Enter Secret" field appears o
   `PYTHONPATH=src venv/bin/python tests/test_sns.py`.
 - **VERIFIED**: `test_sns.py` (11 checks), `test_address_check.py` (35 checks),
   syntax compilation of `src/main.py` and `src/solana/sns.py`, and `git diff --check`.
+
+### Session 2026-07-17 (Spam / scam token filter)
+
+- **NEW** `src/solana/spam_filter.py`: balance-screen spam detection. Classifies each
+  `get_sol_spl_balance` token record as `spam` / `suspicious` / `clean` via three layers:
+  (1) curated registries — `KNOWN_GOOD_MINTS`/`KNOWN_GOOD_SYMBOLS` (verified canonical
+  mints: SOL, USDC, USDT, JUP, BONK, WIF, JTO, JitoSOL — never flagged) and an empty
+  `KNOWN_SPAM_MINTS` blacklist; (2) heuristics — symbol **impersonation** (name/symbol
+  matches a known symbol but mint differs, incl. `"USDC <bait>"`-style names),
+  **suspicious text** (URL fragments `.com`/`.io`/`http`, bait words `claim`/`airdrop`/
+  `visit`/`free`), and **on-chain authority risk** (`mintAuthority` present on an unpriced
+  unknown token = infinite-supply rug; `freezeAuthority` while impersonating = strong scam
+  signal); (3) **liquidity signal** — a token carrying a real Jupiter `usd_price` (set by
+  `prices.py`) downgrades an isolated open-mint-authority hit to clean. `get_mint_authorities`
+  batch-fetches `{mintAuthority, freezeAuthority, supply}` for all mints of a network in one
+  `getMultipleAccountsInfo` call (chunks of 100). `enrich_balance_result_with_spam_filter`
+  mutates each token in place (`token['spam'] = {flag, severity, reasons}`) and runs AFTER
+  pricing so the liquidity signal is available. Never raises / never blocks balance display.
+- **NEW** UI in `src/main.py` (`get_balance_button_click`): runs spam enrichment right after
+  price enrichment. Confirmed-**spam** tokens are hidden behind a per-network red
+  "N spam token(s) hidden — click to show" toggle (rows live in a `visible=False` column,
+  toggle carries the column ref in `data` so no per-loop closure state). **Suspicious**
+  tokens stay visible but get an inline orange warning badge with the detection reasons.
+  A red "Spam filter: N spam hidden / N suspicious" summary banner appears at the top when
+  anything is flagged. The SPL token row builder was extracted into a local
+  `_build_spl_token_controls(spl_token)` helper so spam/suspicious/normal all render
+  identically; the existing transfer/burn/priority-fee handlers are untouched (they read
+  named fields from `data`, and the extra `spam` key is harmless).
+- **NEW** `tests/test_spam_filter.py` (31 checks): impersonation, suspicious-text,
+  authority-risk heuristics; `classify_token` severity rules (known-good short-circuit,
+  blacklist→spam, impersonation/url→spam, bait/open-mint→suspicious, priced→clean);
+  `enrich_balance_result_with_spam_filter` summary; `is_hidden_spam`/`is_suspicious`;
+  and graceful degradation (`get_mint_authorities` returns `{}` instead of raising on a
+  dead endpoint). Run with `PYTHONPATH=src venv/bin/python tests/test_spam_filter.py`.
+- **VERIFIED**: `test_spam_filter.py` (31 checks), `test_history_csv.py`, `test_sns.py`,
+  syntax compilation of `src/main.py` and `src/solana/spam_filter.py`, a headless
+  enrichment run on W1 devnet (real tokens: clean as expected, no crash), and a synthetic
+  mixed spam/clean scenario (fake-USDC→hidden, `"claim at x.com"`→hidden,
+  `"Free airdrop"`→suspicious, real USDC & priced token→clean).
 
 ## Security reminders
 
