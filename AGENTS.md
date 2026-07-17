@@ -924,13 +924,13 @@ assert on the built control structure.
 **Next groups** (suggested order, each = one commit, lowest coupling first):
 1. ~~Address book (`ab_*`, poisoning gate, contact picker)~~ — **DONE** (see "Phase 7 —
    Group 1: Address book" below). 2. ~~Dev tools (sim/rpc/rawkey pages)~~ — **DONE** (see
-   "Phase 7 — Group 2: Dev tools" below). 3. NFT gallery + Liquid staking enter pages.
+   "Phase 7 — Group 2: Dev tools" below, committed `651581a`). 3. NFT gallery + Liquid staking enter pages.
    4. WalletConnect (`_wc_*`/`on_wc_*`). 5. Transfer screens (SOL/SPL, burn/close).
    6. Wallet cards + views (`homepage`/`more_page`/`settings_page`/`route_change`) —
    the orchestrators, done last.
 
 #### Phase 7 — Group 2: Dev tools (`sim` / `rpc` / `raw-key` pages)
-UI-only extraction (working tree, not yet committed). Lifted the three Developer-layer
+UI-only extraction (committed `651581a`). Lifted the three Developer-layer
 pages (Phase 6) out of `main()` into `src/ui/components/devtools.py`. `main.py` 4926→4539.
 - **NEW** `src/ui/components/devtools.py` — `build_sim_page(ctx)`/`build_rpc_page(ctx)`/
   `build_rawkey_page(ctx)` (each returns a `flet.View`), `rawkey_enter(ctx)` (async,
