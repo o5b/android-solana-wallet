@@ -776,8 +776,71 @@ the `solana/` business layer is untouched. Phases 4–5 are DONE in the working 
   (SOL-only 73.68 vs full SOL+SPL 173.66 on a synthetic mainnet+devnet result; devnet
   correctly excluded). The Phase-5 Playwright 3-mode smoke (PIN `1234`, W1 watch-only
   on devnet) was run in the Phase-5 session; the mainnet-priced Simple banner is
-  verified headlessly (devnet isn't priced). **Next: commit Phases 4–5, then Phase 6**
-  (developer layer — Simulation inspector / raw RPC / CSV / DevTools).
+  verified headlessly (devnet isn't priced). Phases 4–5 committed (`5ca3c5a` + `0971359`).
+
+### Session 2026-07-17 (UI reorganization — Phase 6: Developer layer)
+
+Tiered-UI redesign Phase 6 of the plan in `info/17-06-2026_UI.md` /
+`info/17-07-2026_UI_progress.md`. UI-only (`src/main.py`); the `solana/` business layer
+is untouched — all three new pages reuse existing functions. Phase 6 is DONE in the
+working tree (not yet committed).
+
+- **Goal**: gather dev-only tools into the More hub's **Developer** section. Adds three
+  new pages, each gated by an already-present matrix key (no new keys): Simulation
+  inspector (`sim_detail`), Raw RPC inspector (`custom_rpc`), Export raw keys
+  (`raw_export`). CSV export (`csv_export`) stays on the history page (Phase 5).
+- **Imports** (`src/main.py`): `from solana.simulation import analyze_transaction` +
+  `import httpx` (first direct httpx use in main.py; already a project dependency).
+- **NEW Simulation inspector** (`sim-page`, gated `sim_detail`): paste base64 tx + network
+  dropdown (mainnet/testnet/devnet) + optional signer pubkey → **Analyze** runs
+  `analyze_transaction` (read-only, unsigned-safe: `sigVerify=false`,
+  `replaceRecentBlockhash=true`) and renders status / fee / message version / fee payer /
+  account count / compute units / programs / ⚠ unverified programs / per-account SOL Δ /
+  token Δ / ⚠ warnings / coloured simulation logs / **Copy raw JSON**. try/except →
+  "analyze failed: …". Read-only — never signs/broadcasts.
+- **NEW Raw RPC inspector** (`rpc-page`, gated `custom_rpc`): endpoint source dropdown
+  (mainnet/testnet/devnet presets + **custom RPC URL** field) + commitment selector
+  (processed/confirmed/finalized) + method selector (`getBalance` /
+  `getAccountInfo` / `getTransaction` / `getSignaturesForAddress` /
+  `getLatestBlockhash`) + input field → **Run** posts a direct JSON-RPC request via
+  `httpx.AsyncClient` and renders pretty-printed response (selectable + Copy). Read-only
+  methods only; errors degrade to a red "RPC failed: …" row.
+- **NEW Export raw keys** (`raw-key-page`, gated `raw_export`): red **DANGER** banner +
+  one Card per wallet with **Reveal**/**Copy** for `private_key_hex` /
+  `secret_key_base58` / `words` / `public_key_hex`. Decrypts on demand via
+  `decrypt_for_display` (needs the app unlocked — same PIN gate as Wallet Info);
+  watch-only wallets only expose the public key (the 3 secret rows show
+  "(watch-only wallet — no private key)"). `rawkey_enter()` (async, mirrors `nft_enter`)
+  rebuilds the wallet list each visit.
+- **Hub wiring**: `more_enter()` Developer section refactored from a single
+  `if feature("devtools")` block into a `dev_items = []` list assembled from per-tool
+  `feature(...)` checks (`devtools`/`sim_detail`/`custom_rpc`/`raw_export`/`devtools`);
+  the whole section (header + divider + items) is omitted when `dev_items` is empty. New
+  nav handlers `nav_sim`/`nav_rpc`/`nav_rawkey`; new `route_change` branches for
+  `sim-page`/`rpc-page`/`raw-key-page`.
+- **INVARIANT preserved**: `homepage.controls[-1]` still the wallets list; new pages
+  defined before `route_change(None)`; no `solana/` change; hub `dev_items` refactor is
+  additive (existing items/data contracts untouched).
+- **Key symbols** (`src/main.py`): `el_rawkey_page`; `sim_analyze_click`/`sim_page`/
+  `sim_net_dd`/`sim_tx_ta`; `rpc_run_click`/`rpc_page`/`rpc_source_dd`/`_rpc_endpoint()`;
+  `rawkey_reveal_click`/`rawkey_copy_click`/`rawkey_enter`/`raw_key_page`;
+  `nav_sim`/`nav_rpc`/`nav_rawkey`; `more_enter` Developer `dev_items` list.
+- **VERIFIED**: syntax (`py_compile` on `src/main.py` + `src/ui/experience.py`),
+  `git diff --check` clean. Headless: feature gating (`devtools`/`sim_detail`/
+  `custom_rpc`/`raw_export`/`csv_export` all True only in Developer); `analyze_transaction`
+  end-to-end on a real signed devnet tx (status `ok`, System Program + Compute Budget,
+  W1 −0.001005 / W2 +0.001, CU 450); raw `getBalance` on W1 devnet (4.04 SOL). End-to-end
+  via Playwright (Developer mode, PIN `1234`, W1 watch-only): More hub shows all 5 dev
+  tools; RPC inspector → structured output (no error); sim inspector → 10 rows + logs +
+  Copy raw JSON (empty-input error path also OK); raw-key page → watch-only exposes only
+  the public key; Simple mode hides the whole Developer section. 0 console errors.
+- **PLAYWRIGHT NOTES** (added to `info/ui-testing-playbook.md`): (1) the Flet `Dropdown`
+  overlay **is** openable via paired `pointerdown`/`pointerup` on `flt-glass-pane` with
+  an explicit `pointerId: 1` at the trigger centre (coords from a `boxes:true` snapshot)
+  — §6.1 has the copy-paste recipe; the earlier "not automatable" claim was incomplete.
+  (2) CanvasKit draws `Text` on the canvas — `browser_find`/DOM text walks return nothing
+  for output text, so assert on the rendered control set or re-run the logic headlessly
+  (§12).
 
 ## Security reminders
 
