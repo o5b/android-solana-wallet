@@ -3720,7 +3720,10 @@ async def main(page: flet.Page):
             await page.shared_preferences.set("theme_mode", "DARK")
         page.update()
 
-    theme_control = flet.Switch(label="Light theme", on_change=theme_changed)
+    theme_control = flet.Switch(
+        label="Light theme" if page.theme_mode == flet.ThemeMode.LIGHT else "Dark theme",
+        on_change=theme_changed,
+    )
 
     async def dev_tools_storage_list():
         lv = flet.ListView(expand=1, spacing=10, padding=20, auto_scroll=True)
@@ -3766,92 +3769,78 @@ async def main(page: flet.Page):
         for key in keys:
             await page.shared_preferences.remove(key)
 
-    async def selected_drawer(e):
-        print(f'e.control.selected_index: {e.control.selected_index}')
-        if e.control.selected_index == 0:
-            # await page.push_route('settings-page')
-            pass
-        elif e.control.selected_index == 2:
-            await page.push_route('addressbook-page')
-        elif e.control.selected_index == 3:
-            await page.push_route('dev-storage-page')
-        elif e.control.selected_index == 4:
-            await clear_client_storage()
+    # ---- Navigation handlers used by the "More" hub ----
+    async def nav_addressbook(e): await page.push_route("addressbook-page")
+    async def nav_dev_storage(e): await page.push_route("dev-storage-page")
 
-    drawer = flet.NavigationDrawer(
-        # on_dismiss=handle_dismissal,
-        on_change=selected_drawer,
-        controls=[
-            flet.Container(height=20),
-            theme_control,
-            flet.NavigationDrawerDestination(
-                label="Item 1",
-                icon=flet.Icons.DOOR_BACK_DOOR_OUTLINED,
-                selected_icon=flet.Icon(flet.Icons.DOOR_BACK_DOOR),
+    async def clear_storage_click(e):
+        """Wipe ALL local storage (wallets, PIN, contacts, WC pairing). Destructive."""
+        dlg = flet.AlertDialog(
+            title=flet.Text("Clear ALL local storage?"),
+            content=flet.Text(
+                "This permanently deletes every wallet, the PIN, contacts and "
+                "WalletConnect pairing. Encrypted secrets cannot be recovered.",
+                size=12,
             ),
-            flet.Divider(thickness=2),
-            flet.NavigationDrawerDestination(
-                icon=flet.Icon(flet.Icons.MAIL_OUTLINED),
-                label="Item 2",
-                selected_icon=flet.Icon(flet.Icons.MAIL),
-            ),
-            flet.NavigationDrawerDestination(
-                icon=flet.Icon(flet.Icons.CONTACTS_OUTLINED),
-                label="Address Book",
-                selected_icon=flet.Icon(flet.Icons.CONTACTS),
-            ),
-            flet.Divider(thickness=2),
-            flet.Text("DevTools:", size=20, text_align=flet.TextAlign.CENTER),
-            flet.NavigationDrawerDestination(
-                label="Storage",
-                icon=flet.Icons.STORAGE,
-                selected_icon=flet.Icon(flet.Icons.STORAGE_OUTLINED),
-            ),
-            flet.NavigationDrawerDestination(
-                label="Clear Storage",
-                icon=flet.Icons.DEVELOPER_MODE,
-                selected_icon=flet.Icon(flet.Icons.DEVELOPER_MODE_OUTLINED),
-            ),
-        ],
-    )
+            actions=[
+                flet.TextButton("Cancel", on_click=lambda ev: _close_dlg(dlg)),
+                flet.TextButton(
+                    "Clear everything",
+                    style=flet.ButtonStyle(color=flet.Colors.RED),
+                    on_click=lambda ev: asyncio.create_task(_do_clear_storage(dlg)),
+                ),
+            ],
+        )
+        page.show_dialog(dlg)
+
+    async def _do_clear_storage(dlg):
+        _close_dlg(dlg)
+        await clear_client_storage()
+        page.show_dialog(flet.AlertDialog(title=flet.Text("All local storage cleared.")))
+        await page.push_route("/")
 
     async def selected_navbar(e):
-        print(f'e.control.selected_index: {e.control.selected_index}')
-        if e.control.selected_index == 1:
-            await page.push_route("create-wallet-page")
-        elif e.control.selected_index == 2:
-            await page.push_route("recover-wallet-page")
-        elif e.control.selected_index == 3:
-            await page.push_route("add-wallet-address-page")
-        elif e.control.selected_index == 4:
-            await page.window.destroy()
-        else:
+        idx = e.control.selected_index
+        if idx == 0:
             await page.push_route("/")
+        elif idx == 1:
+            await page.push_route("create-wallet-page")
+        elif idx == 2:
+            await page.push_route("recover-wallet-page")
+        elif idx == 3:
+            await page.push_route("add-wallet-address-page")
+        elif idx == 4:
+            await page.push_route("more-page")
 
     navbar = flet.NavigationBar(
-        on_change = selected_navbar,
+        on_change=selected_navbar,
         destinations=[
             flet.NavigationBarDestination(
-                label="Menu",
-                icon=flet.Icon(flet.Icons.GRID_VIEW_ROUNDED),
+                label="Home",
+                icon=flet.Icon(flet.Icons.HOME_OUTLINED),
+                selected_icon=flet.Icon(flet.Icons.HOME),
             ),
             flet.NavigationBarDestination(
                 label="New",
-                icon=flet.Icon(flet.Icons.CODE),
+                icon=flet.Icon(flet.Icons.ADD_OUTLINED),
+                selected_icon=flet.Icon(flet.Icons.ADD),
             ),
             flet.NavigationBarDestination(
                 label="Recover",
                 icon=flet.Icon(flet.Icons.ROCKET_LAUNCH_OUTLINED),
+                selected_icon=flet.Icon(flet.Icons.ROCKET_LAUNCH),
             ),
             flet.NavigationBarDestination(
                 label="Add",
-                icon=flet.Icon(flet.Icons.CODE),
+                icon=flet.Icon(flet.Icons.LINK_OUTLINED),
+                selected_icon=flet.Icon(flet.Icons.LINK),
             ),
             flet.NavigationBarDestination(
-                label="Exit",
-                icon=flet.Icon(flet.Icons.CANCEL),
+                label="More",
+                icon=flet.Icon(flet.Icons.APPS_OUTLINED),
+                selected_icon=flet.Icon(flet.Icons.APPS),
             ),
-       ]
+        ],
     )
 
     # ===================== WalletConnect v2 =====================
@@ -4156,35 +4145,45 @@ async def main(page: flet.Page):
         await _wc_refresh_sessions()
         await _wc_ensure_client()
 
-    async def nav_wc(e):
-        await page.push_route("wc-page")
+    # ---- "More" hub: navigation handlers + item builder ----
+    async def nav_wc(e): await page.push_route("wc-page")
+    async def nav_nft(e): await page.push_route("nft-page")
+    async def nav_stake(e): await page.push_route("stake-page")
+    async def nav_more(e): await page.push_route("more-page")
+    async def nav_settings(e): await page.push_route("settings-page")
 
-    connect_dapp_button = flet.ElevatedButton(
-        content=flet.Text("Connect dApp (WalletConnect v2)"),
-        icon=flet.Icons.LINK,
-        on_click=nav_wc,
-        width=320,
-    )
-
-    async def nav_nft(e):
-        await page.push_route("nft-page")
-
-    nft_gallery_button = flet.ElevatedButton(
-        content=flet.Text("NFT Gallery"),
-        icon=flet.Icons.COLLECTIONS,
-        on_click=nav_nft,
-        width=320,
-    )
-
-    async def nav_stake(e):
-        await page.push_route("stake-page")
-
-    liquid_staking_button = flet.ElevatedButton(
-        content=flet.Text("Liquid Staking"),
-        icon=flet.Icons.SAVINGS,
-        on_click=nav_stake,
-        width=320,
-    )
+    def _hub_item(icon, title: str, subtitle: str, on_click, badge: str = "") -> flet.Card:
+        """One tappable entry in the 'More' hub: icon + title + description + chevron."""
+        trailing = []
+        if badge:
+            trailing.append(flet.Container(
+                content=flet.Text(badge, size=10, color=flet.Colors.WHITE, weight=flet.FontWeight.BOLD),
+                bgcolor=flet.Colors.GREY_500, border_radius=6, padding=4,
+            ))
+        return flet.Card(
+            content=flet.Container(
+                ink=True,
+                on_click=on_click,
+                padding=12,
+                width=440,
+                content=flet.Row(
+                    [
+                        flet.Icon(icon, size=28, color=flet.Colors.BLUE_700),
+                        flet.Column(
+                            [
+                                flet.Text(title, size=15, weight=flet.FontWeight.BOLD),
+                                flet.Text(subtitle, size=11, color=flet.Colors.GREY_700),
+                            ],
+                            expand=True,
+                            spacing=1,
+                        ),
+                        *trailing,
+                        flet.Icon(flet.Icons.CHEVRON_RIGHT, color=flet.Colors.GREY_400),
+                    ],
+                    alignment=flet.MainAxisAlignment.START,
+                ),
+            ),
+        )
 
     async def route_change(route):
         reset_activity()
@@ -4220,6 +4219,10 @@ async def main(page: flet.Page):
         elif page.route == "stake-page":
             await lst_enter()
             page.views.append(stake_page)
+        elif page.route == "more-page":
+            page.views.append(more_page)
+        elif page.route == "settings-page":
+            page.views.append(settings_page)
         # else:
         #     page.views.append(homepage)
         page.update()
@@ -4284,19 +4287,18 @@ async def main(page: flet.Page):
         appbar=flet.AppBar(
             bgcolor="#1da1f2",
             color="white",
-            title=flet.Text("HomePage"),
+            title=flet.Text("Solana Wallet"),
+            actions=[
+                flet.IconButton(icon=flet.Icons.APPS, tooltip="More", on_click=nav_more),
+            ],
         ),
         navigation_bar=navbar,
-        drawer=drawer,
         horizontal_alignment=flet.CrossAxisAlignment.CENTER,
         scroll=flet.ScrollMode.AUTO,
         controls=[
             # flet.Image(src="solana.jpg", width=page.width, height=200, fit=flet.ImageFit.FILL),
             flet.Text('Solana', size=30, font_family="Georgia", weight=flet.FontWeight.BOLD),
             button_group_1,
-            flet.Row([connect_dapp_button], alignment=flet.MainAxisAlignment.CENTER),
-            flet.Row([nft_gallery_button], alignment=flet.MainAxisAlignment.CENTER),
-            flet.Row([liquid_staking_button], alignment=flet.MainAxisAlignment.CENTER),
             flet.Text('Wallets:', size=30, font_family="Georgia", weight=flet.FontWeight.BOLD),
             await get_wallets_cards(),
         ],
@@ -4548,6 +4550,104 @@ async def main(page: flet.Page):
             flet.Text('Liquid Staking', size=30, font_family="Georgia"),
             el_lst_page,
         ]
+    )
+
+    more_page = flet.View(
+        route="more-page",
+        appbar=flet.AppBar(
+            title=flet.Text("More"),
+            color="white",
+            bgcolor="#1da1f2",
+            leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
+        ),
+        navigation_bar=navbar,
+        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
+        scroll=flet.ScrollMode.AUTO,
+        controls=[
+            flet.Column(
+                [
+                    flet.Text("WEB3 & DeFi", size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600),
+                    _hub_item(flet.Icons.LINK, "Connect dApp",
+                              "Pair with a dApp via WalletConnect v2 and sign requests.", nav_wc),
+                    _hub_item(flet.Icons.COLLECTIONS, "NFT Gallery",
+                              "Browse and send your non-fungible tokens.", nav_nft),
+                    _hub_item(flet.Icons.SAVINGS, "Liquid Staking",
+                              "Stake SOL into JitoSOL / mSOL / bSOL / jupSOL.", nav_stake),
+                    flet.Divider(),
+                    flet.Text("Tools", size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600),
+                    _hub_item(flet.Icons.CONTACTS, "Address Book",
+                              "Saved recipients with address-poisoning protection.", nav_addressbook),
+                    _hub_item(flet.Icons.SETTINGS, "Settings",
+                              "Theme, security and app preferences.", nav_settings),
+                    flet.Divider(),
+                    flet.Text("Developer", size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600),
+                    _hub_item(flet.Icons.STORAGE, "Storage inspector",
+                              "View and edit raw shared_preferences keys.", nav_dev_storage, badge="dev"),
+                    _hub_item(flet.Icons.DELETE_SWEEP_OUTLINED, "Clear all storage",
+                              "Wipe every wallet, PIN and pairing. Irreversible.", clear_storage_click, badge="danger"),
+                ],
+                spacing=6,
+                width=460,
+            ),
+        ],
+    )
+
+    settings_page = flet.View(
+        route="settings-page",
+        appbar=flet.AppBar(
+            title=flet.Text("Settings"),
+            color="white",
+            bgcolor="#1da1f2",
+            leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
+        ),
+        navigation_bar=navbar,
+        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
+        scroll=flet.ScrollMode.AUTO,
+        controls=[
+            flet.Column(
+                [
+                    flet.Text("Appearance", size=18, weight=flet.FontWeight.BOLD),
+                    flet.Card(
+                        content=flet.Container(
+                            padding=12,
+                            width=440,
+                            content=flet.Row(
+                                [flet.Icon(flet.Icons.PALETTE_OUTLINED), theme_control],
+                                alignment=flet.MainAxisAlignment.SPACE_BETWEEN,
+                            ),
+                        )
+                    ),
+                    flet.Divider(),
+                    flet.Text("About", size=18, weight=flet.FontWeight.BOLD),
+                    flet.Card(
+                        content=flet.Container(
+                            padding=12,
+                            width=440,
+                            content=flet.Column(
+                                [
+                                    flet.Text("Solana Wallet", size=15, weight=flet.FontWeight.BOLD),
+                                    flet.Text("Hand-rolled Solana wallet (Python + Flet).",
+                                              size=11, color=flet.Colors.GREY_700),
+                                    flet.Text("All blockchain logic is implemented from scratch "
+                                              "(no solana-py / solders).",
+                                              size=11, color=flet.Colors.GREY_700),
+                                ],
+                                spacing=2,
+                            ),
+                        )
+                    ),
+                    flet.Container(height=8),
+                    flet.Text("Experience level (coming soon)", size=13,
+                              weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600),
+                    flet.Text(
+                        "A Simple / Pro / Developer mode switch is planned for the next phase — "
+                        "it will hide advanced WEB3 and developer tools until you need them.",
+                        size=11, color=flet.Colors.GREY_600),
+                ],
+                spacing=6,
+                width=460,
+            ),
+        ],
     )
 
     page.on_route_change = route_change
