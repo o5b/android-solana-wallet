@@ -723,6 +723,62 @@ UI + a small new `src/ui/` package; the `solana/` business layer is untouched. C
   first Developer pick shows the warning (Cancel reverts, Enable persists + marks seen); second
   Developer pick skips the warning. 0 console errors. `git diff --check` clean.
 
+### Session 2026-07-17 (UI reorganization — Phases 4–5 + review fixes)
+
+Tiered-UI redesign Phases 4–5 of the plan in `info/17-06-2026_UI.md` /
+`info/17-07-2026_UI_progress.md`. UI-only (`src/main.py` + `src/ui/experience.py`);
+the `solana/` business layer is untouched. Phases 4–5 are DONE in the working tree
+(not yet committed); the Phase-5 review findings are fixed and ready to commit.
+
+- **Phase 4 (hub filtering)**: `more_page` → async `more_enter()` builder reads the
+  experience mode and only appends gated `_hub_item(...)` calls. Mapping: Connect dApp
+  → `walletconnect`, NFT Gallery → `nft`, Liquid Staking → `staking`, Storage inspector
+  + Clear all storage → `devtools`; Address Book + Settings always visible. Empty
+  sections are omitted entirely (Simple mode shows only Tools). `route_change` calls
+  `await more_enter()` for `more-page`.
+- **Phase 5 (progressive disclosure)**: same screens, different detail per mode. 5 new
+  feature keys in `experience.py` `_MATRIX`: `priority_fee` (Pro/Dev),
+  `priority_fee_custom` (Dev), `history_detail` (Pro/Dev), `history_tech` (Dev),
+  `balance_raw` (Dev); reused `spl_tokens`/`csv_export`/`sim_detail`. Per screen:
+  - Balance (`get_balance_button_click`): Simple = SOL + USD only (SPL + spam filter
+    hidden; spam enrichment skipped); Pro/Dev = + SPL + spam filter; Dev = + raw token
+    dump + "Inspect on Solscan".
+  - Priority fee (`make_priority_fee_block`): Simple = hidden → `priority_fee=0` (Auto,
+    byte-identical to before); Pro = Auto/Low/Med/High presets; Dev = + Custom slider +
+    µLamports field + percentile readout.
+  - History (`get_history_button_click`): Simple = header + inline status only; Pro =
+    + expandable Signature/"Status | Fee"; Dev = + Slot/Version/CU + logs + CSV button.
+  - Token detail (`_build_spl_token_detail`, extracted): Pro = friendly summary; Dev =
+    raw key/value dump + Solscan link (arrow button `data` gained `'network'`).
+  - WC request (`on_wc_request` / `_wc_render_preview(..., show_program_ids=)`): Pro =
+    unknown programs shown as a count; Dev = + full sim logs + raw session/request JSON.
+- **Phase 5 review fixes** (from `/review uncommitted`, all in `src/main.py`):
+  - **FIXED (CRITICAL)** `on_wc_request` Dev raw-JSON dump leaked the live WC2 relay
+    `symkey` (the ChaCha20-Poly1305 session key — would let anyone decrypt/forge relay
+    messages; the session topic is public). Now serializes a scrubbed copy
+    (`{k: v for k, v in session.items() if k != "symkey"}`) before `json.dumps`; the
+    other session fields (peer, accounts, public X25519 keys) are dApp-known and kept.
+  - **FIXED (WARNING)** Simple-mode "Portfolio value" banner over-counted: it summed
+    SPL `usd_value` the user can't see (SPL rows are hidden in Simple). Banner now uses
+    a SOL-only subtotal (`sum(nr.get('sol_usd') or 0.0 ...)`) in Simple; the
+    "(no priced tokens)" note is suppressed in Simple. Pro/Dev unchanged.
+  - **FIXED (SUGGESTION)** Simple mode wasted the slow per-token SPL fetch: now reads
+    the mode first and passes `include_transfer_cost=show_spl, include_image_bytes=show_spl`
+    to `get_sol_spl_balance` (the NFT-gallery fast path). SOL USD pricing still works via
+    the wrapped-SOL mint.
+  - **FIXED (SUGGESTION)** redundant `get_experience(page)` await in the Dev block of
+    `on_wc_request` → reuses the already-fetched `_wc_mode`.
+- **INVARIANT preserved**: `homepage.controls[-1]` still the wallets list; hidden
+  priority-fee → `priority_fee=0` (Auto), identical wire bytes to before; existing
+  `data`-dict contracts (amount/recipient/secret/pf_state) untouched.
+- **VERIFIED**: syntax (`py_compile` on `src/main.py` + `src/ui/experience.py`),
+  `git diff --check` clean, and a headless check of the SOL-only banner subtotal
+  (SOL-only 73.68 vs full SOL+SPL 173.66 on a synthetic mainnet+devnet result; devnet
+  correctly excluded). The Phase-5 Playwright 3-mode smoke (PIN `1234`, W1 watch-only
+  on devnet) was run in the Phase-5 session; the mainnet-priced Simple banner is
+  verified headlessly (devnet isn't priced). **Next: commit Phases 4–5, then Phase 6**
+  (developer layer — Simulation inspector / raw RPC / CSV / DevTools).
+
 ## Security reminders
 
 - Private keys and mnemonics are stored **encrypted at rest** (Fernet) once a PIN is set;

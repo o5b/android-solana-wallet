@@ -38,6 +38,12 @@ _MATRIX: dict[str, set[str]] = {
     "custom_rpc": {DEVELOPER},
     "csv_export": {DEVELOPER},
     "sim_detail": {DEVELOPER},
+    # Phase 5 — progressive disclosure inside existing screens.
+    "priority_fee": {PRO, DEVELOPER},        # priority-fee selector on transfer pages
+    "priority_fee_custom": {DEVELOPER},      # Custom slider + µLamports field + percentiles
+    "history_detail": {PRO, DEVELOPER},      # expandable fee/signature details in history
+    "history_tech": {DEVELOPER},             # slot/version/CU/logs rows in history details
+    "balance_raw": {DEVELOPER},              # raw mint/program_id dump + explorer link on tokens
 }
 
 # human labels / descriptions used by the Settings selector

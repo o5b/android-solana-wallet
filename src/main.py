@@ -232,7 +232,21 @@ async def main(page: flet.Page):
         sender for SOL transfers, the mint for SPL transfers) and returns
         (ui_column, state) where ``state['get']()`` yields the chosen
         micro-lamports-per-CU price (0 = Auto / no priority fee).
+
+        Progressive disclosure (Phase 5):
+        - Simple   -> block hidden entirely, state always returns 0 (Auto).
+        - Pro      -> Auto/Low/Medium/High presets only (no Custom).
+        - Developer -> + Custom slider + µLamports field + percentile readout.
         """
+        # Simple mode: no selector, always Auto (priority_fee=0). Returning an
+        # invisible empty column keeps the callers untouched (they still append
+        # `pf_block` and read `pf_state`); _pf_from_data then yields None.
+        mode = await get_experience(page)
+        if not feature("priority_fee", mode):
+            state = {'micro_lamports': 0, 'get': lambda: 0}
+            return flet.Column([], visible=False), state
+        allow_custom = feature("priority_fee_custom", mode)
+
         try:
             levels = await get_priority_fee_levels(account_for_fees, network)
         except Exception as er:
@@ -310,26 +324,35 @@ async def main(page: flet.Page):
         slider.on_change = _on_slide
         custom_tf.on_change = _on_custom_change
 
-        presets = flet.Row(
-            [
-                flet.ElevatedButton("Auto", on_click=_preset(0)),
-                flet.ElevatedButton("Low", on_click=_preset(levels['low'])),
-                flet.ElevatedButton("Medium", on_click=_preset(levels['medium'])),
-                flet.ElevatedButton("High", on_click=_preset(levels['high'])),
-                flet.ElevatedButton("Custom", on_click=_custom),
-            ],
-            wrap=True,
-        )
+        preset_buttons = [
+            flet.ElevatedButton("Auto", on_click=_preset(0)),
+            flet.ElevatedButton("Low", on_click=_preset(levels['low'])),
+            flet.ElevatedButton("Medium", on_click=_preset(levels['medium'])),
+            flet.ElevatedButton("High", on_click=_preset(levels['high'])),
+        ]
+        if allow_custom:
+            preset_buttons.append(flet.ElevatedButton("Custom", on_click=_custom))
 
-        block = flet.Column(
-            [
-                flet.Text("Priority fee (lands faster when the network is busy)", size=13, weight=flet.FontWeight.BOLD),
-                presets,
-                flet.Row([slider]),
-                flet.Row([custom_tf]),
-                estimate_txt,
-            ]
-        )
+        presets = flet.Row(preset_buttons, wrap=True)
+
+        block_controls = [
+            flet.Text("Priority fee (lands faster when the network is busy)", size=13, weight=flet.FontWeight.BOLD),
+            presets,
+        ]
+        if allow_custom:
+            # Developer-only: percentile readout from get_priority_fee_levels.
+            block_controls.append(
+                flet.Text(
+                    f"Recent fees (µLamports/CU): low {levels['low']:,} · "
+                    f"med {levels['medium']:,} · high {levels['high']:,} · max {levels['max']:,}",
+                    size=11, color=flet.Colors.GREY_600, selectable=True,
+                )
+            )
+            block_controls.append(flet.Row([slider]))
+            block_controls.append(flet.Row([custom_tf]))
+        block_controls.append(estimate_txt)
+
+        block = flet.Column(block_controls)
         _refresh()
         state['get'] = lambda: state['micro_lamports']
         return block, state
@@ -1254,6 +1277,15 @@ async def main(page: flet.Page):
             tmp_history_result = [flet.Divider(thickness=3)]
             csv_history = []
 
+            # Progressive disclosure (Phase 5):
+            # - Simple   -> header only (time/type/amount/status), no expandable details.
+            # - Pro      -> + expandable Signature/Status/Fee.
+            # - Developer -> + Slot/Version/CU + logs + CSV export button.
+            _mode = await get_experience(page)
+            show_detail = feature("history_detail", _mode)
+            show_tech = feature("history_tech", _mode)
+            show_csv = feature("csv_export", _mode)
+
             for net_name, net_url in networks:
                 tmp_history_result.append(
                     flet.Row([flet.Text(f'Network: {net_name}', size=16, weight=flet.FontWeight.BOLD)])
@@ -1300,41 +1332,67 @@ async def main(page: flet.Page):
 
                         # Изолированная функция для создания интерактивной карточки
                         def create_tx_card(tx_data, t_str, b_spans):
+                            # Progressive disclosure: Simple = header only;
+                            # Pro = + expandable Signature/Status/Fee;
+                            # Developer = + Slot/Version/CU + logs.
+                            header_lines = [
+                                flet.Text(f"{t_str} • {tx_data.get('tx_type', 'Unknown')}", size=12, weight=flet.FontWeight.BOLD, color="grey700"),
+                                flet.Text(spans=b_spans),
+                            ]
+                            # Simple mode has no expandable details, so surface
+                            # the status directly under the amount.
+                            if not show_detail:
+                                header_lines.append(
+                                    flet.Text(
+                                        f"{'Success' if tx_data['success'] else 'Failed'}",
+                                        size=11,
+                                        color="green" if tx_data['success'] else "red",
+                                    )
+                                )
 
-                            # Формируем логи в виде прокручиваемого списка
-                            logs_controls = [flet.Text("Logs:", size=12, weight=flet.FontWeight.BOLD)]
-                            if tx_data.get('logs'):
-                                for log in tx_data['logs']:
-                                    # Подсвечиваем ошибки красным для удобства
-                                    log_color = "red" if "failed" in log.lower() or "error" in log.lower() else "grey"
-                                    logs_controls.append(flet.Text(f"• {log}", size=10, color=log_color, selectable=True))
-                            else:
-                                logs_controls.append(flet.Text("No logs available", size=10, color="grey"))
+                            if not show_detail:
+                                return flet.Card(
+                                    content=flet.Container(
+                                        padding=10,
+                                        content=flet.Column(header_lines),
+                                    )
+                                )
 
-                            # Оборачиваем логи в Column с фиксированной высотой и скроллом
-                            logs_column = flet.Container(
-                                content=flet.Column(logs_controls, spacing=2, scroll=flet.ScrollMode.AUTO),
-                                height=100,
-                                padding=5,
-                                border=flet.border.all(1, "black12"),
-                                border_radius=5
-                            )
+                            details_inner = [
+                                flet.Divider(thickness=1),
+                                flet.Text(f"Signature: {tx_data['signature']}", selectable=True, size=12, italic=True),
+                                flet.Text(
+                                    f"Status: {'Success' if tx_data['success'] else 'Failed'} | Fee: {tx_data.get('fee', 0):.9f} SOL",
+                                    size=12,
+                                    color="green" if tx_data['success'] else "red"
+                                ),
+                            ]
+                            if show_tech:
+                                # Формируем логи в виде прокручиваемого списка
+                                logs_controls = [flet.Text("Logs:", size=12, weight=flet.FontWeight.BOLD)]
+                                if tx_data.get('logs'):
+                                    for log in tx_data['logs']:
+                                        # Подсвечиваем ошибки красным для удобства
+                                        log_color = "red" if "failed" in log.lower() or "error" in log.lower() else "grey"
+                                        logs_controls.append(flet.Text(f"• {log}", size=10, color=log_color, selectable=True))
+                                else:
+                                    logs_controls.append(flet.Text("No logs available", size=10, color="grey"))
+
+                                # Оборачиваем логи в Column с фиксированной высотой и скроллом
+                                logs_column = flet.Container(
+                                    content=flet.Column(logs_controls, spacing=2, scroll=flet.ScrollMode.AUTO),
+                                    height=100,
+                                    padding=5,
+                                    border=flet.border.all(1, "black12"),
+                                    border_radius=5
+                                )
+                                details_inner.append(
+                                    flet.Text(f"Slot: {tx_data.get('slot')} | Version: {tx_data.get('version')} | CU Consumed: {tx_data.get('compute_units')}", size=12, color="blue")
+                                )
+                                details_inner.append(logs_column)
 
                             # Скрытая колонка с деталями
-                            details_col = flet.Column(
-                                visible=False,
-                                controls=[
-                                    flet.Divider(thickness=1),
-                                    flet.Text(f"Signature: {tx_data['signature']}", selectable=True, size=12, italic=True),
-                                    flet.Text(
-                                        f"Status: {'Success' if tx_data['success'] else 'Failed'} | Fee: {tx_data.get('fee', 0):.9f} SOL",
-                                        size=12,
-                                        color="green" if tx_data['success'] else "red"
-                                    ),
-                                    flet.Text(f"Slot: {tx_data.get('slot')} | Version: {tx_data.get('version')} | CU Consumed: {tx_data.get('compute_units')}", size=12, color="blue"),
-                                    logs_column
-                                ]
-                            )
+                            details_col = flet.Column(visible=False, controls=details_inner)
 
                             # Обработчик кнопки-стрелки
                             def toggle_details(e):
@@ -1348,10 +1406,7 @@ async def main(page: flet.Page):
                                     padding=10,
                                     content=flet.Column([
                                         flet.Row([
-                                            flet.Column([
-                                                flet.Text(f"{t_str} • {tx_data.get('tx_type', 'Unknown')}", size=12, weight=flet.FontWeight.BOLD, color="grey700"),
-                                                flet.Text(spans=b_spans),
-                                            ], expand=True),
+                                            flet.Column(header_lines, expand=True),
                                             flet.IconButton(
                                                 icon=flet.Icons.ARROW_DROP_DOWN,
                                                 icon_size=30,
@@ -1371,7 +1426,7 @@ async def main(page: flet.Page):
 
                 tmp_history_result.append(flet.Divider(thickness=1))
 
-            if csv_history:
+            if csv_history and show_csv:
                 csv_content = transaction_history_to_csv(csv_history)
 
                 async def export_history_csv_click(_):
@@ -1442,7 +1497,19 @@ async def main(page: flet.Page):
             page.update()
             tmp_balance_result = []
             start = datetime.now()
-            result = await get_sol_spl_balance(wallet['address_base58'], networks)
+            # Progressive disclosure (Phase 5): SPL tokens, the spam filter and
+            # the raw token dump are Pro/Developer-only. Simple mode shows just
+            # the native SOL rows + the USD portfolio banner, so it also skips
+            # the slow per-token priority-fee RPC + raw image-byte downloads
+            # (same fast path as the NFT gallery). SOL USD pricing still works
+            # via the wrapped-SOL mint in enrich_balance_result_with_prices.
+            mode = await get_experience(page)
+            show_spl = feature("spl_tokens", mode)
+            result = await get_sol_spl_balance(
+                wallet['address_base58'], networks,
+                include_transfer_cost=show_spl,
+                include_image_bytes=show_spl,
+            )
             print(f'****** get_sol_spl_balance result: {result}')
 
             # USD pricing (Jupiter Price API v3). Values are attached only to
@@ -1458,12 +1525,15 @@ async def main(page: flet.Page):
             # real-market-liquidity signal (token['usd_price']) to downgrade an
             # isolated open-mint-authority hit. Hides confirmed spam, badges
             # suspicious tokens. Never breaks balance display on failure.
-            try:
-                spam_info = await enrich_balance_result_with_spam_filter(result)
-                print(f'****** spam_info: {spam_info}')
-            except Exception as spam_er:
-                print(f'spam enrichment skipped: {spam_er}')
-                spam_info = {"spam": 0, "suspicious": 0, "flagged": 0, "total": 0}
+            # Skipped in Simple mode (no SPL tokens are rendered anyway).
+            spam_info = {"spam": 0, "suspicious": 0, "flagged": 0, "total": 0}
+            if show_spl:
+                try:
+                    spam_info = await enrich_balance_result_with_spam_filter(result)
+                    print(f'****** spam_info: {spam_info}')
+                except Exception as spam_er:
+                    print(f'spam enrichment skipped: {spam_er}')
+                    spam_info = {"spam": 0, "suspicious": 0, "flagged": 0, "total": 0}
 
             for i, r in enumerate(result):
                 tmp_balance_spl = []
@@ -1544,7 +1614,7 @@ async def main(page: flet.Page):
                                                 ],
                                             ),
                                             on_click=spl_token_arrow_drop_down_button_click,
-                                            data={k: v for k, v in spl_token.items() if k not in ('logo', 'spam')},
+                                            data={**{k: v for k, v in spl_token.items() if k not in ('logo', 'spam')}, 'network': r['network']},
                                         ),
                                     ],
                                     alignment=flet.MainAxisAlignment.CENTER,
@@ -1553,63 +1623,64 @@ async def main(page: flet.Page):
                         ),
                     ]
 
-                for spl_token in r['spl']:
-                    if spl_token['amount'] <= 0:
-                        continue
-                    # Confirmed-spam tokens are hidden behind a toggle; they
-                    # can still be inspected/shown, but don't clutter the list.
-                    if is_hidden_spam(spl_token):
-                        spam_token_count += 1
-                        tmp_spam_spl.extend(_build_spl_token_controls(spl_token))
-                        continue
-                    # Suspicious (not confirmed) tokens stay visible but are
-                    # badged with the detection reasons so the user is warned.
-                    if is_suspicious(spl_token):
-                        _sv = spl_token.get('spam') or {}
-                        _reasons = ', '.join(_sv.get('reasons') or []) or 'flagged as risky'
-                        tmp_balance_spl.append(
-                            flet.Row(
-                                [
-                                    flet.Icon(flet.Icons.WARNING_AMBER_ROUNDED, color=flet.Colors.ORANGE, size=18),
-                                    flet.Text(f'Suspicious: {_reasons}', size=12, color=flet.Colors.ORANGE_800, selectable=True),
-                                ],
-                            )
-                        )
-                    tmp_balance_spl.extend(_build_spl_token_controls(spl_token))
-
-                # "N spam tokens hidden" expander. Hidden rows live in a column
-                # that is shown on demand; the toggle carries the column ref in
-                # its `data` so the handler needs no per-loop closure state.
-                if tmp_spam_spl:
-                    _spam_col = flet.Column(controls=tmp_spam_spl, visible=False)
-
-                    async def _toggle_spam(e):
-                        col = e.control.data
-                        col.visible = not col.visible
-                        await page.update()
-
-                    tmp_balance_spl.extend([
-                        flet.Container(
-                            content=flet.TextButton(
-                                on_click=_toggle_spam,
-                                data=_spam_col,
-                                content=flet.Row(
+                if show_spl:
+                    for spl_token in r['spl']:
+                        if spl_token['amount'] <= 0:
+                            continue
+                        # Confirmed-spam tokens are hidden behind a toggle; they
+                        # can still be inspected/shown, but don't clutter the list.
+                        if is_hidden_spam(spl_token):
+                            spam_token_count += 1
+                            tmp_spam_spl.extend(_build_spl_token_controls(spl_token))
+                            continue
+                        # Suspicious (not confirmed) tokens stay visible but are
+                        # badged with the detection reasons so the user is warned.
+                        if is_suspicious(spl_token):
+                            _sv = spl_token.get('spam') or {}
+                            _reasons = ', '.join(_sv.get('reasons') or []) or 'flagged as risky'
+                            tmp_balance_spl.append(
+                                flet.Row(
                                     [
-                                        flet.Icon(flet.Icons.WARNING, color=flet.Colors.RED, size=18),
-                                        flet.Text(
-                                            f'{spam_token_count} spam token(s) hidden — click to show',
-                                            size=12, color=flet.Colors.RED,
-                                        ),
+                                        flet.Icon(flet.Icons.WARNING_AMBER_ROUNDED, color=flet.Colors.ORANGE, size=18),
+                                        flet.Text(f'Suspicious: {_reasons}', size=12, color=flet.Colors.ORANGE_800, selectable=True),
                                     ],
+                                )
+                            )
+                        tmp_balance_spl.extend(_build_spl_token_controls(spl_token))
+
+                    # "N spam tokens hidden" expander. Hidden rows live in a column
+                    # that is shown on demand; the toggle carries the column ref in
+                    # its `data` so the handler needs no per-loop closure state.
+                    if tmp_spam_spl:
+                        _spam_col = flet.Column(controls=tmp_spam_spl, visible=False)
+
+                        async def _toggle_spam(e):
+                            col = e.control.data
+                            col.visible = not col.visible
+                            await page.update()
+
+                        tmp_balance_spl.extend([
+                            flet.Container(
+                                content=flet.TextButton(
+                                    on_click=_toggle_spam,
+                                    data=_spam_col,
+                                    content=flet.Row(
+                                        [
+                                            flet.Icon(flet.Icons.WARNING, color=flet.Colors.RED, size=18),
+                                            flet.Text(
+                                                f'{spam_token_count} spam token(s) hidden — click to show',
+                                                size=12, color=flet.Colors.RED,
+                                            ),
+                                        ],
+                                    ),
                                 ),
+                                padding=flet.padding.symmetric(vertical=2, horizontal=8),
+                                margin=flet.margin.only(top=4, bottom=4),
+                                bgcolor=flet.Colors.with_opacity(0.08, flet.Colors.RED),
+                                border_radius=flet.border_radius.all(8),
                             ),
-                            padding=flet.padding.symmetric(vertical=2, horizontal=8),
-                            margin=flet.margin.only(top=4, bottom=4),
-                            bgcolor=flet.Colors.with_opacity(0.08, flet.Colors.RED),
-                            border_radius=flet.border_radius.all(8),
-                        ),
-                        _spam_col,
-                    ])
+                            _spam_col,
+                        ])
                 tmp_request_airdrop = []
                 if r['network'] == "https://api.testnet.solana.com" or r['network'] == "https://api.devnet.solana.com":
                     tmp_request_airdrop.append(
@@ -1696,11 +1767,19 @@ async def main(page: flet.Page):
                     tmp_balance_result.append(flet.Divider(thickness=1))
             el_token_balance_data.controls.clear()
             _balance_controls = [flet.Divider(thickness=3)]
-            # Portfolio value banner (mainnet holdings only)
-            if price_info.get('mainnet') and price_info.get('total_usd'):
+            # Portfolio value banner (mainnet holdings only). In Simple mode
+            # SPL rows are hidden, so the banner must reflect native SOL only
+            # (otherwise it advertises value the user cannot see). sol_usd is
+            # only attached to mainnet entries by enrich_balance_result_with_prices.
+            _banner_total = price_info.get('total_usd', 0.0)
+            _note = ''
+            if not show_spl:
+                _banner_total = sum(nr.get('sol_usd') or 0.0 for nr in result)
+            else:
                 _priced = price_info.get('priced', 0)
                 _tokens = price_info.get('tokens', 0)
                 _note = '' if _priced or not _tokens else ' (no priced tokens)'
+            if price_info.get('mainnet') and _banner_total:
                 _balance_controls.append(
                     flet.Container(
                         content=flet.Row(
@@ -1709,7 +1788,7 @@ async def main(page: flet.Page):
                                     value='',
                                     spans=[
                                         flet.TextSpan('Portfolio value  ', flet.TextStyle(size=14, color=flet.Colors.GREY_700)),
-                                        flet.TextSpan(fmt_usd(price_info['total_usd']), flet.TextStyle(size=22, weight=flet.FontWeight.BOLD)),
+                                        flet.TextSpan(fmt_usd(_banner_total), flet.TextStyle(size=22, weight=flet.FontWeight.BOLD)),
                                     ],
                                 ),
                             ],
@@ -1955,44 +2034,8 @@ async def main(page: flet.Page):
                     alignment=flet.MainAxisAlignment.CENTER,
                 ),
             )
-            # tmp_show_spl_token_data = []
-            spl_token_data_text = ''
-            for k, v in data.items():
-                spl_token_data_text = spl_token_data_text + f'{k}: {v}\n'
-                # tmp_show_spl_token_data.append(
-                #     flet.Row(
-                #         scroll=flet.ScrollMode.AUTO,
-                #         controls=[
-                #             flet.Text(
-                #                 value='',
-                #                 selectable=True,
-                #                 spans=[
-                #                     flet.TextSpan(f'{k}: ', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
-                #                     flet.TextSpan(f'{v}', flet.TextStyle(size=16)),
-                #                 ]
-                #             ),
-                #         ]
-                #     )
-                # )
-            e.control.parent.parent.controls.extend(
-                [
-                    flet.Text(value=spl_token_data_text, selectable=True),
-                    # flet.Row([flet.Text(value=spl_token_data_text, selectable=True)]),
-                    # *tmp_show_spl_token_data,
-                    # flet.Row(
-                    #     [
-                    #         # flet.TextButton("Copy"),
-                    #         flet.ElevatedButton(
-                    #             text="Copy",
-                    #             icon=flet.Icons.COPY,
-                    #             on_click=spl_token_data_copy_clicked,
-                    #             data=data
-                    #         )
-                    #     ],
-                    #     alignment=flet.MainAxisAlignment.CENTER,
-                    # ),
-                ]
-            )
+            detail_controls = await _build_spl_token_detail(data)
+            e.control.parent.parent.controls.extend(detail_controls)
         except Exception as er:
             print(f'Error spl_token_arrow_drop_down_button_click: {er}')
             page.show_dialog(
@@ -2002,6 +2045,69 @@ async def main(page: flet.Page):
             )
         finally:
             page.update()
+
+    async def _build_spl_token_detail(data: dict) -> list:
+        """Token detail rows for the arrow-drop-down expander.
+
+        Progressive disclosure (Phase 5):
+        - Pro       -> friendly summary (symbol, amount, USD, mint short, program).
+        - Developer -> full raw key/value dump + a Solscan explorer link.
+        """
+        mode = await get_experience(page)
+        rows: list = []
+        if feature("balance_raw", mode):
+            spl_token_data_text = ''
+            for k, v in data.items():
+                spl_token_data_text = spl_token_data_text + f'{k}: {v}\n'
+            rows.append(flet.Text(value=spl_token_data_text, selectable=True))
+            mint = str(data.get('mint') or '')
+            if mint:
+                net = str(data.get('network') or '')
+                cluster = ''
+                if 'devnet' in net:
+                    cluster = '?cluster=devnet'
+                elif 'testnet' in net:
+                    cluster = '?cluster=testnet'
+                url = f"https://solscan.io/token/{mint}{cluster}"
+                rows.append(
+                    flet.Row(
+                        [
+                            flet.ElevatedButton(
+                                content=flet.Text("Inspect on Solscan"),
+                                icon=flet.Icons.OPEN_IN_NEW,
+                                on_click=lambda _e, u=url: page.launch_url(u),
+                            ),
+                        ],
+                    )
+                )
+            return rows
+        # Pro: friendly summary only.
+        symbol = ''
+        if data.get('symbol_metaplex'):
+            symbol += f"{data['symbol_metaplex']} "
+        if data.get('symbol_2022'):
+            symbol += f"{data['symbol_2022']}"
+        symbol = (symbol or data.get('name_2022') or '').strip() or '(unknown)'
+        mint = str(data.get('mint') or '')
+        mint_short = f"{mint[:6]}…{mint[-4:]}" if len(mint) >= 12 else mint
+        program = str(data.get('program_id') or '')
+        program_tag = 'Token-2022' if program.startswith('Tokenz') else ('Token' if program.startswith('Token') else program[:12])
+        usd_line = ''
+        if data.get('usd_value') is not None:
+            usd_line = f"USD value: {fmt_usd(data['usd_value'])}"
+            if data.get('usd_price') is not None:
+                usd_line += f"  (price {fmt_usd(data['usd_price'])})"
+        summary = (
+            f"Token: {symbol}\n"
+            f"Amount: {data.get('amount')}\n"
+            f"Decimals: {data.get('decimals')}\n"
+            f"Mint: {mint_short}\n"
+            f"Program: {program_tag}\n"
+        )
+        if usd_line:
+            summary += f"{usd_line}\n"
+        rows.append(flet.Text(value=summary, selectable=True))
+        return rows
 
     async def spl_token_arrow_drop_up_button_click(e):
         try:
@@ -4074,14 +4180,17 @@ async def main(page: flet.Page):
         )
         page.show_dialog(dlg_p)
 
-    def _wc_render_preview(preview: dict) -> str:
+    def _wc_render_preview(preview: dict, show_program_ids: bool = False) -> str:
         method = preview.get("method")
         lines = [f"Method: {method}", f"Chain: {preview.get('chain_id')}"]
         decoded = preview.get("decoded") or {}
         if decoded.get("programs"):
             lines.append("Programs: " + ", ".join(decoded["programs"]))
         if decoded.get("unknown_programs"):
-            lines.append("⚠ Unverified programs: " + ", ".join(decoded["unknown_programs"]))
+            if show_program_ids:
+                lines.append("⚠ Unverified programs: " + ", ".join(decoded["unknown_programs"]))
+            else:
+                lines.append(f"⚠ {len(decoded['unknown_programs'])} unverified program(s)")
         sim = preview.get("simulation") or {}
         if sim:
             lines.append("Predicted status: " + str(sim.get("status")))
@@ -4111,7 +4220,8 @@ async def main(page: flet.Page):
         target = params.get("pubkey") if params else None
         if not target and accounts:
             target = accounts[0]
-        preview_text = _wc_render_preview(preview)
+        _wc_mode = await get_experience(page)
+        preview_text = _wc_render_preview(preview, show_program_ids=feature("sim_detail", _wc_mode))
 
         async def do_approve(e):
             dlg_r.open = False
@@ -4149,6 +4259,51 @@ async def main(page: flet.Page):
                 flet.Text(
                     "⚠ Simulation predicts this transaction will FAIL. Signing is blocked.",
                     color="red", size=12,
+                )
+            )
+        # Developer-only (Phase 5): full simulation logs + raw session/request JSON.
+        # Reuse _wc_mode (already awaited above) — avoids two extra shared_preferences round-trips.
+        if feature("sim_detail", _wc_mode):
+            sim_logs = sim.get("logs") or []
+            if sim_logs:
+                content_controls.append(flet.Text("Simulation logs:", size=11, weight=flet.FontWeight.BOLD))
+                log_controls = []
+                for log in sim_logs:
+                    log_color = "red" if ("failed" in str(log).lower() or "error" in str(log).lower()) else "grey"
+                    log_controls.append(flet.Text(f"• {log}", size=10, color=log_color, selectable=True))
+                content_controls.append(
+                    flet.Container(
+                        content=flet.Column(log_controls, spacing=1, scroll=flet.ScrollMode.AUTO),
+                        height=120,
+                        padding=5,
+                        border=flet.border.all(1, "black12"),
+                        border_radius=5,
+                    )
+                )
+            # SECURITY: scrub relay keying material before dumping. The live
+            # WC2 `symkey` (ChaCha20-Poly1305 relay session key) would let
+            # anyone decrypt + forge relay messages for this session — its
+            # topic is public. The other session fields (peer, accounts,
+            # namespaces, public X25519 keys) are dApp-known and safe to show.
+            scrubbed_session = {k: v for k, v in session.items() if k != "symkey"}
+            try:
+                raw_json = json.dumps(
+                    {"session": scrubbed_session, "request": request, "simulation": sim},
+                    indent=2, default=str,
+                )
+            except Exception:
+                raw_json = "raw JSON unavailable"
+            content_controls.append(flet.Text("Raw session/request JSON:", size=11, weight=flet.FontWeight.BOLD))
+            content_controls.append(
+                flet.Container(
+                    content=flet.Column(
+                        [flet.Text(raw_json, size=9, selectable=True, color=flet.Colors.GREY_700)],
+                        spacing=1, scroll=flet.ScrollMode.AUTO,
+                    ),
+                    height=160,
+                    padding=5,
+                    border=flet.border.all(1, "black12"),
+                    border_radius=5,
                 )
             )
         dlg_r = flet.AlertDialog(
