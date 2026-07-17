@@ -11,7 +11,7 @@ import qrcode
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from solana.create_wallet import create_solana_wallet
-from solana.balance import get_sol_spl_balance, get_sol_balance, get_priority_fee_levels
+from solana.balance import get_sol_spl_balance, get_sol_balance
 from solana.nft import get_nfts
 from solana.transfer_sol import transfer_sol_token, get_min_sol_balance
 # from solana.transfer_spl import transfer_spl_token
@@ -65,6 +65,11 @@ from ui.experience import (
     set_experience,
     has_seen_dev_warning,
     mark_dev_warning_seen,
+)
+from ui.context import AppContext
+from ui.components.priority_fee import (
+    make_priority_fee_block,
+    pf_from_data as _pf_from_data,
 )
 
 
@@ -129,6 +134,17 @@ async def main(page: flet.Page):
         "last_activity": time.time(),
         "lock_dialog": None,      # currently-shown lock/setup dialog (if any)
     }
+
+    # Shared context handed to ui/ modules (Phase 7 refactor). It wraps the live
+    # `page` + `session` objects by reference so legacy closures and extracted
+    # modules share one source of truth during the incremental migration.
+    ctx = AppContext(
+        page=page,
+        session=session,
+        pin_salt_key=PIN_SALT_KEY,
+        pin_verifier_key=PIN_VERIFIER_KEY,
+        auto_lock_seconds=AUTO_LOCK_SECONDS,
+    )
 
     def reset_activity():
         """Mark now as the most recent user activity (postpones auto-lock)."""
@@ -227,144 +243,7 @@ async def main(page: flet.Page):
             return input_secret, ''
         return '', "Invalid secret."
 
-    async def make_priority_fee_block(network: str, account_for_fees: str, cu_limit: int) -> tuple[flet.Column, dict]:
-        """Build a Low / Medium / High / Custom priority-fee selector.
-
-        Fetches recent prioritization-fee levels for `account_for_fees` (the
-        sender for SOL transfers, the mint for SPL transfers) and returns
-        (ui_column, state) where ``state['get']()`` yields the chosen
-        micro-lamports-per-CU price (0 = Auto / no priority fee).
-
-        Progressive disclosure (Phase 5):
-        - Simple   -> block hidden entirely, state always returns 0 (Auto).
-        - Pro      -> Auto/Low/Medium/High presets only (no Custom).
-        - Developer -> + Custom slider + µLamports field + percentile readout.
-        """
-        # Simple mode: no selector, always Auto (priority_fee=0). Returning an
-        # invisible empty column keeps the callers untouched (they still append
-        # `pf_block` and read `pf_state`); _pf_from_data then yields None.
-        mode = await get_experience(page)
-        if not feature("priority_fee", mode):
-            state = {'micro_lamports': 0, 'get': lambda: 0}
-            return flet.Column([], visible=False), state
-        allow_custom = feature("priority_fee_custom", mode)
-
-        try:
-            levels = await get_priority_fee_levels(account_for_fees, network)
-        except Exception as er:
-            print(f'priority fee levels fetch failed, using defaults: {er}')
-            levels = {'low': 1_000, 'medium': 5_000, 'high': 25_000, 'max': 25_000}
-
-        state = {'micro_lamports': 0}
-
-        def _sol(ul: int) -> str:
-            return f"{(cu_limit * ul) / 1_000_000 / 1_000_000_000:.9f}"
-
-        estimate_txt = flet.Text(size=12, color=flet.Colors.GREY_700, selectable=True)
-        slider_max = max(levels['max'] * 2, 10_000)
-        slider = flet.Slider(min=0, max=slider_max, divisions=200, label="{value}", visible=False)
-        custom_tf = flet.TextField(
-            label="µLamports / CU", value="0", width=150, min_lines=1, max_lines=1,
-            max_length=12, visible=False, keyboard_type=flet.KeyboardType.NUMBER,
-        )
-
-        def _refresh():
-            ul = state['micro_lamports']
-            if ul <= 0:
-                estimate_txt.value = "Priority fee: Auto (no priority fee)"
-            else:
-                estimate_txt.value = f"Priority fee: {ul:,} µLamports/CU → ≈ {_sol(ul)} SOL"
-            try:
-                page.update()
-            except Exception:
-                pass
-
-        def _set(ul: int):
-            state['micro_lamports'] = max(0, int(ul))
-            slider.value = state['micro_lamports']
-            custom_tf.value = str(state['micro_lamports'])
-            _refresh()
-
-        def _preset(ul: int):
-            def _h(_e):
-                slider.visible = False
-                custom_tf.visible = False
-                _set(ul)
-                try:
-                    page.update()
-                except Exception:
-                    pass
-            return _h
-
-        def _custom(_e):
-            slider.visible = True
-            custom_tf.visible = True
-            try:
-                page.update()
-            except Exception:
-                pass
-
-        def _on_slide(_e):
-            try:
-                ul = int(float(slider.value or 0))
-            except Exception:
-                ul = 0
-            custom_tf.value = str(ul)
-            state['micro_lamports'] = max(0, ul)
-            _refresh()
-
-        def _on_custom_change(_e):
-            try:
-                ul = int(float(custom_tf.value or 0))
-            except Exception:
-                ul = 0
-            ul = max(0, min(ul, int(slider_max)))
-            slider.value = ul
-            state['micro_lamports'] = ul
-            _refresh()
-
-        slider.on_change = _on_slide
-        custom_tf.on_change = _on_custom_change
-
-        preset_buttons = [
-            flet.ElevatedButton("Auto", on_click=_preset(0)),
-            flet.ElevatedButton("Low", on_click=_preset(levels['low'])),
-            flet.ElevatedButton("Medium", on_click=_preset(levels['medium'])),
-            flet.ElevatedButton("High", on_click=_preset(levels['high'])),
-        ]
-        if allow_custom:
-            preset_buttons.append(flet.ElevatedButton("Custom", on_click=_custom))
-
-        presets = flet.Row(preset_buttons, wrap=True)
-
-        block_controls = [
-            flet.Text("Priority fee (lands faster when the network is busy)", size=13, weight=flet.FontWeight.BOLD),
-            presets,
-        ]
-        if allow_custom:
-            # Developer-only: percentile readout from get_priority_fee_levels.
-            block_controls.append(
-                flet.Text(
-                    f"Recent fees (µLamports/CU): low {levels['low']:,} · "
-                    f"med {levels['medium']:,} · high {levels['high']:,} · max {levels['max']:,}",
-                    size=11, color=flet.Colors.GREY_600, selectable=True,
-                )
-            )
-            block_controls.append(flet.Row([slider]))
-            block_controls.append(flet.Row([custom_tf]))
-        block_controls.append(estimate_txt)
-
-        block = flet.Column(block_controls)
-        _refresh()
-        state['get'] = lambda: state['micro_lamports']
-        return block, state
-
-    def _pf_from_data(data: dict) -> int | None:
-        """Read the chosen priority fee (micro-lamports) from a button's data, or None."""
-        pf_state = (data or {}).get('pf_state') or {}
-        val = pf_state.get('get', lambda: 0)() if callable(pf_state.get('get')) else pf_state.get('micro_lamports', 0)
-        val = int(val or 0)
-        return val or None
+    # make_priority_fee_block / _pf_from_data -> moved to ui/components/priority_fee.py (Phase 7).
 
     def decrypt_for_display(wallet: dict) -> dict:
         """Wallet dict with secrets decrypted (for the Wallet Info dialog)."""
@@ -2174,7 +2053,7 @@ async def main(page: flet.Page):
         sns_status = flet.Text(size=11, selectable=True, color=flet.Colors.BLUE_700)
         secret_tf = flet.TextField(label="Enter Secret (12/24 Words or Private Key)", min_lines=1, max_lines=1, max_length=100)
         burn_status = flet.Column()
-        pf_block, pf_state = await make_priority_fee_block(data['network'], data['raw_data']['mint'], cu_limit=80000)
+        pf_block, pf_state = await make_priority_fee_block(ctx, data['network'], data['raw_data']['mint'], cu_limit=80000)
 
         poisoning_banner = make_poisoning_banner()
 
@@ -2987,7 +2866,7 @@ async def main(page: flet.Page):
         print(f'****** go_to_token_page_button_click >> e.control.data: {e.control.data}')
         data = e.control.data
         el_token_page.controls.clear()
-        pf_block, pf_state = await make_priority_fee_block(data['network'], data['wallet_address'], cu_limit=2000)
+        pf_block, pf_state = await make_priority_fee_block(ctx, data['network'], data['wallet_address'], cu_limit=2000)
 
         recipient_tf = flet.TextField(
             label="Recipient address or name.sol", min_lines=1, max_lines=1, max_length=100, expand=True,

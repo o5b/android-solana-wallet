@@ -15,7 +15,17 @@ set (see Security below); the PIN itself is never stored. `address_base58` and
 
 ## Layout
 
-- `src/main.py` — UI, route handlers, all click callbacks
+- `src/main.py` — UI, route handlers, all click callbacks (the monolith being
+  incrementally extracted into `src/ui/` — see "Phase 7" session entry below)
+- `src/ui/` — UI package being grown out of `main.py` (Phase 7 refactor):
+  - `experience.py` — Simple/Pro/Developer mode registry (`feature()` matrix,
+    `get_experience`/`set_experience`). The single source of truth for which
+    features each mode may see.
+  - `context.py` — `AppContext` dataclass: shared app state (`page`, `session`,
+    PIN constants, `controls` registry) passed as the first arg to every
+    extracted `ui/` function. Wraps the live `main()` objects **by reference**.
+  - `components/` — reusable control builders, each taking `ctx` (e.g.
+    `priority_fee.py`). Grows one group at a time.
 - `src/solana/` — blockchain logic:
   - `balance.py` — SOL/SPL balances, metadata parsing, transfer-cost estimate.
     `get_sol_spl_balance(address, networks, include_transfer_cost=True,
@@ -841,6 +851,82 @@ working tree (not yet committed).
   (2) CanvasKit draws `Text` on the canvas — `browser_find`/DOM text walks return nothing
   for output text, so assert on the rendered control set or re-run the logic headlessly
   (§12).
+
+### Session 2026-07-17 (UI reorganization — Phase 7: `main.py` → `ui/` package)
+
+Tiered-UI redesign Phase 7 — the **refactor** phase (highest risk). `main.py` was
+~5390 lines / ~150 nested closures inside one `async def main(page)`, all implicitly
+capturing `page`, the in-memory `session` dict (holds the PIN-derived Fernet key),
+PIN constants and a few shared flet controls. Phase 7 extracts those closures into
+`src/ui/` one group at a time. Plan + detailed per-group handoff live in
+`info/17-06-2026_UI.md` (design) and `info/17-07-2026_UI_progress.md` (progress).
+**`info/` is gitignored** — those notes survive across sessions on this machine but
+are NOT in git; **this AGENTS.md entry is the durable migration reference**.
+
+Strategy chosen (with the user): **foundation + incremental pilot**, passing an
+**`AppContext` object** as the first arg to every extracted function (highest-risk
+phase → small, independently-committable steps; never a big-bang). The pilot landed
+in the working tree, passed `/review uncommitted` (APPROVE WITH SUGGESTIONS — one
+unused import, fixed), **NOT yet committed**.
+
+**Migration contract (applies to every future group):**
+- Every extracted function takes `ctx: AppContext` as its first arg (replaces
+  implicit closure capture of `page` / `session`).
+- `ctx.page` / `ctx.session` are the **same live objects** `main()` created —
+  `AppContext` wraps by reference, never copies, so legacy closures and extracted
+  modules share one source of truth during the incremental migration.
+- Use `ctx.safe_update()` instead of the inline `try: page.update() except: pass`.
+- Pure helpers (no `page`/`session` need) take explicit args and need no `ctx`.
+- A group is "done" when its closures are deleted from `main.py` and its call sites
+  pass `ctx`. Keep `main.py` as bootstrap + route orchestrator.
+- `solana/` business layer is never touched.
+
+**What shipped (working tree):**
+- **NEW** `src/ui/context.py` — `AppContext` dataclass: `page`, `session`,
+  `pin_salt_key`/`pin_verifier_key`/`auto_lock_seconds`, `controls` registry, plus
+  accessors `is_unlocked()` / `reset_activity()` / `safe_update()`.
+- **NEW** `src/ui/components/__init__.py` + `src/ui/components/priority_fee.py` —
+  the **pilot**: `make_priority_fee_block(ctx, network, account_for_fees, cu_limit)`
+  + pure `pf_from_data(data)`. Lifted verbatim from `main.py` (`page`→`ctx.page`,
+  `try/except page.update()`→`ctx.safe_update()`).
+- **CHANGED** `src/main.py`: imports `AppContext` + the module; removed the now-unused
+  `get_priority_fee_levels` import; builds `ctx = AppContext(page=page, session=session,
+  ...)` right after `session`; deleted both closures; updated the 2
+  `make_priority_fee_block(...)` call sites to pass `ctx` (the 4 `_pf_from_data(data)`
+  sites use an alias import — unchanged). Net: 5406 → 5269 lines.
+
+**INVARIANTS preserved:** `homepage.controls[-1]` still the wallets list; Simple-mode
+hidden priority fee still yields `priority_fee=0` (Auto, byte-identical wire bytes);
+existing `data`-dict contracts (`pf_state`/`cu_limit`/amount/recipient/secret) untouched.
+
+**Key symbols** (`src/main.py` — re-grep, line numbers drift): `ctx = AppContext(...)`
+(~L141, right after `session`); the one-line migration marker (~L246); the import
+block `from ui.context import AppContext` / `from ui.components.priority_fee import ...`
+(~L69).
+
+**VERIFIED:** `py_compile` on all 3 files; headless runtime build of
+`make_priority_fee_block(ctx,…)` in all 3 modes (Simple→hidden/0, Pro→4 presets,
+Dev→+Custom; `ctx.safe_update()` routes to `page.update()` and swallows its errors);
+Playwright (PIN `1234`): boots clean, 0 console errors, unlocks, homepage renders.
+`git diff --check` clean.
+
+**flet headless-testing gotchas** (for future groups; full notes in
+`info/ui-testing-playbook.md` §13): (1) `flet.Page.update` is NOT a coroutine
+(`inspect.iscoroutinefunction` → False) — calling it un-awaited is correct (matches
+legacy). (2) `ElevatedButton("text")` stores the label in `.content`, **not** `.text`,
+in flet 0.82.2. (3) flet registers event handlers in an internal registry, so
+`control.on_click` reads as `None` outside a live session — **headless tests can only
+assert control *construction*, not click wiring**; verify clicks via Playwright or by
+re-running the underlying `solana/` function. (4) Reusable headless recipe: mock
+`page` with async `shared_preferences` + sync `update()`, monkeypatch the slow RPC,
+assert on the built control structure.
+
+**Next groups** (suggested order, each = one commit, lowest coupling first):
+1. Address book (`ab_*`, poisoning gate, contact picker). 2. Dev tools
+(sim/rpc/rawkey pages). 3. NFT gallery + Liquid staking enter pages.
+4. WalletConnect (`_wc_*`/`on_wc_*`). 5. Transfer screens (SOL/SPL, burn/close).
+6. Wallet cards + views (`homepage`/`more_page`/`settings_page`/`route_change`) — the
+orchestrators, done last.
 
 ## Security reminders
 
