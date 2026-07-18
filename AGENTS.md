@@ -932,6 +932,93 @@ assert on the built control structure.
    6. Wallet cards + views (`homepage`/`more_page`/`settings_page`/`route_change`) — the
    orchestrators, done last.
 
+#### Phase 7 — Group 5: Transfer screens (SOL/SPL, burn/close)
+UI-only extraction (committed). Lifted the SOL transfer page, the SPL transfer
+page (transfer / burn / burn-and-close), the token-detail expander on the
+balance screen, the `resolve_recipient_input` (SNS) and `resolve_signing_key`
+helpers, and the two `flet.View` definitions out of `main()` into
+`src/ui/components/transfer.py`. `main.py` 3728→2784 (−944 lines). The
+`solana/` business layer is untouched.
+- **NEW** `src/ui/components/transfer.py` (1104 lines):
+  - **Pure helpers**: `resolve_recipient_input(recipient_raw, network)` (was
+    `main()` closure; no `ctx`), `resolve_signing_key(ctx, data,
+    secret_control)` (uses `ctx.get_wallet_private_key`).
+  - **Token-detail expander** (balance screen): `_build_spl_token_detail(ctx,
+    data)` (Phase-5 Pro summary vs Dev raw dump + Solscan link),
+    `spl_token_arrow_drop_down_click` / `spl_token_arrow_drop_up_click` (arrow
+    toggles).
+  - **SPL transfer page**: `open_spl_token_page(ctx, data)` (was
+    `_open_spl_token_page`; also injected as a callback into `nft_enter` via
+    `lambda data: open_spl_token_page(ctx, data)`), `go_to_spl_token_page_click`,
+    `transfer_spl_click`, `burn_spl_click`, `burn_and_close_click` (modal
+    confirm → burn full balance + close ATA → rent refund).
+  - **SOL transfer page**: `go_to_token_page_click`, `transfer_sol_click`
+    (transfer + post-transfer balance refresh + the "Transfer sol info" card),
+    `request_airdrop_click` (devnet/testnet).
+  - **View builders**: `build_token_page(ctx)` / `build_spl_token_page(ctx)`
+    each bind the matching `ctx.controls["el_*_page"]` Column + wire shared
+    chrome from `ctx.controls["view_pop"]` / `["navbar"]`.
+- **`main.py`**: imports 14 transfer names; **removed** now-unused
+  business-layer imports (`transfer_sol_token`/`get_min_sol_balance`,
+  `request_airdrop`/`transfer_spl_token`/`burn_token`/`close_token_account`/
+  `burn_and_close_token_account`, `SNSResolutionError`/`resolve_sns_name`,
+  `get_sol_balance`, `is_valid_wallet_address`/`is_valid_private_key`/
+  `is_valid_wallet_seed_phrase` — `is_valid_amount` stays for the swap screen);
+  registers `ctx.controls["el_token_page"]` / `["el_spl_token_page"]` next to
+  their `flet.Column()` holders; **adds four named async adapter closures**
+  `on_go_to_spl_token_page` / `on_go_to_token_page` / `on_spl_arrow_drop_down`
+  / `on_request_airdrop` (each `async def on_X(e): await fn(ctx, e)`) — the
+  balance screen's four buttons reference these adapters; deleted the 899-line
+  transfer block + the two helper closures → migration markers; replaced the
+  ~33-line `token_page` / `spl_token_page` `flet.View(...)` definitions with
+  two builder calls; `nft_enter(ctx, _open_spl_token_page)` →
+  `nft_enter(ctx, lambda data: open_spl_token_page(ctx, data))`.
+- **NEW migration-contract rule #7** (Group 5; applies to every future group):
+  **Async `(ctx, e)` module handlers wired from `main.py` → named
+  `async def` adapter closures, NEVER `lambda`.** Flet only awaits an
+  `on_click` it detects as a coroutine function; a plain
+  `lambda ev: async_fn(ctx, ev)` is a sync lambda returning a coroutine →
+  flet calls it, drops the coroutine, and the handler silently never runs
+  (only signalled by a `RuntimeWarning: coroutine ... was never awaited` in
+  the server logs). Always wrap with `async def on_X(e): await fn(ctx, e)`
+  defined inside `main()` so it captures `ctx`. (Internal lambdas *inside*
+  an async function — like the arrow-drop toggle's
+  `on_click=lambda ev: spl_token_arrow_drop_up_click(ctx, ev)` — are fine
+  because the outer async function awaits the inner one.)
+- **INVARIANTS preserved**: `homepage.controls[-1]` still the wallets list;
+  `token_page` / `spl_token_page` built once at bootstrap at the same code
+  location; `route_change` `token-page` / `spl-token-page` branches
+  byte-unchanged; the exact `el_token_page` / `el_spl_token_page` control
+  build order is preserved (the handlers' positional reads of
+  `e.control.parent.parent.controls[N]` depend on it — secret TextField at
+  index 5 (SOL) / 6 (SPL) when locked/watch-only, amount at 3 (SOL) / 4 (SPL),
+  amount display at 2 (SOL)); `data`-dict contracts unchanged; `solana/`
+  untouched.
+- **Key symbols** (`src/main.py` — re-grep, line numbers drift): import block
+  `from ui.components.transfer import (...)` (~L82); the four adapter closures
+  `on_go_to_spl_token_page` / `on_go_to_token_page` / `on_spl_arrow_drop_down`
+  / `on_request_airdrop` (~L244); `ctx.controls["el_token_page"]` /
+  `["el_spl_token_page"]` (~L1390); migration marker (~L1543);
+  `token_page = build_token_page(ctx)` / `spl_token_page =
+  build_spl_token_page(ctx)` (~L2554); NFT callback
+  `lambda data: open_spl_token_page(ctx, data)` (~L2324).
+- **VERIFIED**: `py_compile` on both files; `git diff --check` clean. Headless
+  (`tests/test_transfer_ui.py`, 49 checks): `resolve_recipient_input`
+  (plain/trim/.sol/error), `resolve_signing_key` (stored-key real Fernet
+  round-trip / locked / invalid / raw-hex / no-control), view builders,
+  page builders (12/13 control counts for SPL with/without watch-only secret;
+  10/11 for SOL; NFT prefill '1'), token-detail expander (Pro summary vs Dev
+  raw + Solscan button). Existing offline suites green: `test_address_check`
+  (35), `test_sns` (11), `test_history_csv`, `test_spam_filter` (31),
+  `test_priority_fee`, `test_burn_close`, `test_liquid_staking`,
+  `test_wc2_integration`. End-to-end via Playwright (Pro mode, PIN `1234`, W1
+  watch-only): app **boots clean, 0 console errors**; balance screen renders
+  all four transfer buttons; **SOL "Transfer this token"** → `token-page`
+  renders (incl. watch-only "Enter Secret" + priority-fee presets);
+  **SPL "Transfer this token"** → `spl-token-page` renders (incl. Burn / Burn
+  All & Close Account); **NFT Gallery → SuperNFT7 detail → "Send NFT"** →
+  `spl-token-page` with amount prefilled "1" (callback injection works).
+
 #### Phase 7 — Group 4: WalletConnect (`_wc_*` / `on_wc_*`)
 UI-only extraction (committed `c557166`). Lifted
 the whole WalletConnect v2 responder UI + the `WalletConnectClient` callbacks
