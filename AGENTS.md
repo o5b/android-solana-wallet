@@ -927,12 +927,13 @@ assert on the built control structure.
    "Phase 7 — Group 2: Dev tools" below, committed `651581a`). 3. ~~NFT gallery + Liquid
    staking enter pages~~ — **DONE** (see "Phase 7 — Group 3" below, committed `8e2e309`).
    4. ~~WalletConnect (`_wc_*`/`on_wc_*`)~~ — **DONE** (see "Phase 7 — Group 4:
-   WalletConnect" below). 5. Transfer screens (SOL/SPL, burn/close) — **← NEXT**.
+   WalletConnect" below, committed `c557166`). 5. Transfer screens (SOL/SPL,
+   burn/close) — **← NEXT**.
    6. Wallet cards + views (`homepage`/`more_page`/`settings_page`/`route_change`) — the
    orchestrators, done last.
 
 #### Phase 7 — Group 4: WalletConnect (`_wc_*` / `on_wc_*`)
-UI-only extraction (committed this session — see `git log` for the hash). Lifted
+UI-only extraction (committed `c557166`). Lifted
 the whole WalletConnect v2 responder UI + the `WalletConnectClient` callbacks
 out of `main()` into `src/ui/components/walletconnect.py`. `main.py`
 4104→3728 (−376 lines). The `solana/` business layer (relay/crypto/protocol) is
