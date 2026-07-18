@@ -926,9 +926,98 @@ assert on the built control structure.
    Group 1: Address book" below). 2. ~~Dev tools (sim/rpc/rawkey pages)~~ — **DONE** (see
    "Phase 7 — Group 2: Dev tools" below, committed `651581a`). 3. ~~NFT gallery + Liquid
    staking enter pages~~ — **DONE** (see "Phase 7 — Group 3" below, committed `8e2e309`).
-   4. WalletConnect (`_wc_*`/`on_wc_*`) — **← NEXT**. 5. Transfer screens (SOL/SPL,
-   burn/close). 6. Wallet cards + views (`homepage`/`more_page`/`settings_page`/
-   `route_change`) — the orchestrators, done last.
+   4. ~~WalletConnect (`_wc_*`/`on_wc_*`)~~ — **DONE** (see "Phase 7 — Group 4:
+   WalletConnect" below). 5. Transfer screens (SOL/SPL, burn/close) — **← NEXT**.
+   6. Wallet cards + views (`homepage`/`more_page`/`settings_page`/`route_change`) — the
+   orchestrators, done last.
+
+#### Phase 7 — Group 4: WalletConnect (`_wc_*` / `on_wc_*`)
+UI-only extraction (committed this session — see `git log` for the hash). Lifted
+the whole WalletConnect v2 responder UI + the `WalletConnectClient` callbacks
+out of `main()` into `src/ui/components/walletconnect.py`. `main.py`
+4104→3728 (−376 lines). The `solana/` business layer (relay/crypto/protocol) is
+untouched — the module is purely the Flet UI + the 4 client callbacks.
+- **NEW** `src/ui/components/walletconnect.py` — the full WC2 responder:
+  - `_wc_state(ctx)` — per-session `{"client": ...}` holder, **lazily created
+    in `ctx.session["_wc_state"]`**. The live `WalletConnectClient` owns a relay
+    WebSocket + ChaCha20-Poly1305 symkeys, so it is strictly per-session
+    (web mode starts one `main()` per client). Matches the Group-1 rule that
+    any per-session mutable state goes to `ctx.session`, never module level.
+  - `_get_project_id` / `_get_identity_seed` — `shared_preferences` prefs
+    (`wc.project_id` / `wc.identity_seed`) + 32-byte identity seed with
+    persist-on-first-use.
+  - `_resolve_signer(ctx, account_b58)` — wallet-key resolution via
+    `ctx.get_wallet_private_key` + `ui.wallets.load_wallets`. Returns `None`
+    for falsy input / unknown account / watch-only wallet; returns `""` while
+    locked or on encrypted-decrypt-failure (call sites treat both with
+    `if not priv:` — faithful to the legacy closure).
+  - `_dapp_name` / `_render_preview` — pure helpers (preview collapses
+    unverified-programs to a count unless `show_program_ids=True`, i.e. Dev).
+  - `_make_disconnect_handler(ctx, topic)` — per-row disconnect-button factory
+    (replaces the original `data=s["topic"]` + `e.control.data` indirection —
+    behaviourally identical).
+  - `_refresh_sessions` / `_on_proposal` / `_on_request` / `_on_session` — the
+    active-sessions list + the 3 `WalletConnectClient` callbacks. The
+    Phase-5 Developer-mode sim-logs + raw session/request JSON dump is lifted
+    verbatim, **including the `symkey` scrub** (`{k: v for ... if k != "symkey"}`
+    before `json.dumps`) — the relay session key is never shown.
+  - `_ensure_client(ctx)` — get-or-create client; wires the 4 callbacks as thin
+    `lambda ...: _on_X(ctx, ...)` so the per-session client can fire them from
+    its relay loop without holding `ctx` itself.
+  - `wc_connect_click` / `wc_save_pid_click` — static button handlers (module
+    level, `(ctx, e)` signature, wired via nested adapter closures).
+  - `build_wc_page(ctx)` — view builder. Creates the 4 long-lived WC controls
+    (`wc_uri_input` / `wc_pid_input` / `wc_status_text` / `wc_sessions_list`)
+    and registers them in `ctx.controls` so the module-level handlers reach
+    them without being nested in the builder. Wires shared chrome from
+    `ctx.controls["view_pop"]` / `["navbar"]` (same pattern as devtools).
+  - `wc_enter(ctx)` — enter hook (mirrors `rawkey_enter` / `nft_enter`).
+- **`main.py`**: imports `build_wc_page` / `wc_enter`; replaced the ~370-line
+  WC block (`_wc_*` / `on_wc_*` / `wc_*_input` / `wc_enter_page`) + the
+  `wc_page = flet.View(...)` definition with a migration marker +
+  `wc_page = build_wc_page(ctx)`; `route_change` `wc-page` branch →
+  `await wc_enter(ctx)`. **Removed** the now-unused `from solana.walletconnect
+  import WalletConnectClient, WalletConnectError, SOLANA_CHAINS` (the last two
+  were already dead imports; the client import moved into the module).
+  `nav_wc` stays in `main.py` (it is a "More" hub navigation handler used by
+  `more_enter`, which migrates with the orchestrator group).
+- **Coupling**: wallet records via `ui.wallets.load_wallets` (replaces
+  `get_storage_data(prefix="wallet.")` — strict subset, equivalent for the
+  address-match loops); signer keys via `ctx.get_wallet_private_key` (replaces
+  the legacy closure); shared view chrome via `ctx.controls`. No outbound
+  navigation (WC is self-contained), so — unlike Group 3 — no callback arg.
+- **INVARIANTS preserved**: `homepage.controls[-1]` still the wallets list; WC
+  page built once at bootstrap at the same code location; `solana/` untouched;
+  the `symkey` scrub in the Dev raw-JSON dump is byte-identical (the Phase-5
+  security fix is preserved); per-session client state in `ctx.session` (web-mode
+  isolation preserved); existing `data`-dict contracts untouched (this group
+  has none).
+- **Key symbols** (re-grep — line numbers drift): `src/ui/components/walletconnect.py`:
+  `WC_PROJECT_ID_KEY` / `WC_IDENTITY_KEY`, `_wc_state` / `_get_project_id` /
+  `_get_identity_seed` / `_resolve_signer` / `_dapp_name` / `_render_preview` /
+  `_make_disconnect_handler` / `_refresh_sessions` / `_on_proposal` /
+  `_on_request` / `_on_session` / `_ensure_client` / `wc_connect_click` /
+  `wc_save_pid_click` / `build_wc_page` / `wc_enter`. `src/main.py`: import
+  `from ui.components.walletconnect import build_wc_page, wc_enter` (~L79);
+  migration marker (~L3160); `wc_page = build_wc_page(ctx)` (~L3448);
+  route_change `wc-page` → `await wc_enter(ctx)` (~L3234); `nav_wc` (~L3169).
+- **VERIFIED**: `py_compile` on both files; `git diff --check` clean. Headless
+  (42 checks): per-session `_wc_state` isolation + lazy creation; project-id /
+  identity-seed read+persist; `_dapp_name` / `_render_preview` (collapsed vs
+  expanded unverified-programs); `_resolve_signer` None / unknown / watch-only /
+  plaintext / encrypted-bad; `_ensure_client` returns None without a projectId;
+  `build_wc_page` registers all 4 controls + wires them into the View;
+  `wc_enter` empty-pid + "No active sessions"; `wc_save_pid_click` persists +
+  confirmation dialog; `wc_connect_click` no-pid prompt + invalid-URI rejection
+  + pair-failed path (with `_ensure_client` mocked to a FakeClient). Existing
+  offline suites green: `test_wc2_integration`, `test_address_check` (35),
+  `test_sns` (11), `test_history_csv`, `test_spam_filter` (31). End-to-end via
+  Playwright (Pro mode, PIN `1234`): app boots clean, **0 console errors**;
+  More hub shows Connect dApp (Pro gating intact); WC page renders with all 4
+  controls + "No active sessions"; "Save projectId" handler → confirmation
+  dialog. (The Connect button with a real saved projectId attempts a live relay
+  connect — network-dependent — so the invalid-URI / no-pid paths were verified
+  headlessly with a mocked `_ensure_client` instead of risking a Playwright hang.)
 
 #### Phase 7 — Group 3: NFT gallery + Liquid staking (`enter`-style rebuilders)
 UI-only extraction (committed `8e2e309`). Lifted the NFT gallery
