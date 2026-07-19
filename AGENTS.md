@@ -1010,7 +1010,7 @@ Address) out of `main()` into `src/ui/components/wallet_create.py`. `main.py`
 
 
 #### Phase 7 — Group 6b: Swap page (Jupiter)
-UI-only extraction (working tree, pending commit). Lifted the whole swap
+UI-only extraction (committed `551954c`). Lifted the whole swap
 screen — `go_to_swap_page_button_click` (the balance-screen "Swap" button
 entry handler, with its nested `get_quote_button_click` /
 `swap_button_click` closures) + the `el_swap_page` holder Column + the
