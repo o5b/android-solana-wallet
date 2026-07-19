@@ -933,8 +933,9 @@ assert on the built control structure.
     **IN PROGRESS**. Group 6a (wallet create/recover/add pages) DONE; Group 6b
     (swap page) DONE (see "Phase 7 — Group 6b: Swap page" below); Group 6c
     (PIN gate + lock dialogs) DONE (see "Phase 7 — Group 6c: PIN gate + lock
-    dialogs" below); sub-groups 6d+ (settings+More hub / balance+history+cards
-    / final orchestrator) remain.
+    dialogs" below); Group 6d (Settings + More hub + experience) DONE (see
+    "Phase 7 — Group 6d: Settings + More hub + experience" below); sub-groups
+    6e+ (balance+history+cards / final orchestrator) remain.
 
 #### Phase 7 — Group 6a: Wallet create / recover / add pages
 UI-only extraction (committed `d9941c7` + review fix `f684894`). Lifted the
@@ -1213,6 +1214,142 @@ reuse of `solana.security` crypto primitives.
   on the button object (readable outside a live session for
   `ElevatedButton`/`TextButton`) — the basis for driving the embedded
   `confirm`/`do_unlock` handlers directly in the new test.
+
+
+#### Phase 7 — Group 6d: Settings + More hub + experience
+UI-only extraction (committed `efa639b`). Lifted the **Settings page** (theme switch + experience
+dropdown + the destructive Developer-warning dialog) and the **More hub**
+(the feature-gated hub items + the destructive "Clear all storage" flow + 8
+navigation handlers) out of `main()` into `src/ui/components/settings.py`
+(252 lines) + `src/ui/components/more.py` (269 lines). `main.py`
+1816→**1530** (−286 lines). The `solana/` business layer is untouched.
+
+- **NEW** `src/ui/components/settings.py` (252 lines): module-level
+  `build_settings_page(ctx)` + `settings_enter(ctx)`:
+  - `build_settings_page(ctx)` creates the three long-lived Settings controls
+    (`theme_control` Switch / `experience_dd` Dropdown / `experience_desc`
+    Text), registers them in `ctx.controls`, and returns the `flet.View`
+    (route `settings-page`, chrome via `ctx.controls["view_pop"]` /
+    `["navbar"]`). The embedded handlers live as closures capturing those
+    controls: `theme_changed` (toggles `page.theme_mode` + persists
+    `"theme_mode"`), `_apply_experience`/`_on_experience_select` (persist +
+    update the dropdown + description), `_show_dev_warning` /
+    `_cancel_dev_warning` / `_confirm_dev_warning` (the first-switch-into-Dev
+    modal). The Dropdown's `on_select=_on_experience_select` is now a direct
+    named `async def` (the old `lambda e: asyncio.create_task(...)` is gone —
+    cleaner; flet awaits it directly).
+  - `settings_enter(ctx)` is the module-level enter hook (mirrors
+    `wc_enter` / `rawkey_enter` / `addressbook_enter`): re-reads the
+    persisted mode into `ctx.controls["experience_dd"]` /
+    `["experience_desc"]` on each visit so the dropdown reflects the
+    current storage state.
+- **NEW** `src/ui/components/more.py` (269 lines): pure `_hub_item(icon,
+  title, subtitle, on_click, badge="")` builder; `build_more_page(ctx)`
+  creates the empty-controls `flet.View` and registers it in
+  `ctx.controls["more_page"]`; `more_enter(ctx)` rebuilds the hub's controls
+  per experience mode (defines the 9 `nav_*` handlers as tiny `async def`
+  closures capturing `page` from `ctx` — Group 5 rule #7), assembles
+  WEB3/Tools/Developer sections gated by `feature(name, mode)`, omits a
+  section entirely when its items are all gated out, and assigns the result
+  to `ctx.controls["more_page"].controls`. `clear_storage_click(ctx, e)` +
+  `_do_clear_storage(ctx, dlg)` are module-level functions wired from
+  `more_enter` via a named `async def _clear_storage(e)` adapter (Group 5
+  rule #7 — never a lambda for an async handler). `_do_clear_storage` calls
+  `clear_client_storage(ctx)` from `ui.security_gate`.
+- **`main.py`** (1816→1530):
+  - **Imports**: added `from ui.components.more import build_more_page,
+    more_enter` + `from ui.components.settings import build_settings_page,
+    settings_enter`. **Removed** `clear_client_storage` from the
+    `from ui.security_gate import (...)` block (it's only called from
+    `more.py` now — `more.py` imports it directly). **Trimmed** the
+    `from ui.experience import (...)` block from 9 symbols down to just
+    `feature` + `get_experience` — these stay because Group 6e (balance +
+    history handlers) still uses them. `SIMPLE`/`DEVELOPER`/`MODES`/`label`/
+    `description`/`set_experience`/`has_seen_dev_warning`/
+    `mark_dev_warning_seen` moved into the settings module.
+  - **Deleted closures** (~286 lines): `theme_changed`/`theme_control`/
+    `experience_dd`/`experience_desc`/`settings_enter`/`_apply_experience`/
+    `experience_changed`/`_show_dev_warning`/`_cancel_dev_warning`/
+    `_confirm_dev_warning`/`clear_storage_click`/`_do_clear_storage`/
+    `_hub_item`/`more_enter`/`nav_addressbook`/`nav_dev_storage`/`nav_wc`/
+    `nav_nft`/`nav_stake`/`nav_settings`/`nav_sim`/`nav_rpc`/`nav_rawkey` →
+    migration-marker comments. **Kept `nav_more`** — it's the homepage
+    AppBar "More" action icon (homepage stays in `main.py`, migrates with
+    the orchestrator group 6g).
+  - **View builders**: replaced the ~12-line `more_page = flet.View(...)`
+    + the ~70-line `settings_page = flet.View(...)` definitions with
+    `more_page = build_more_page(ctx)` + `settings_page =
+    build_settings_page(ctx)` (built once at bootstrap at the same code
+    location — `route_change` `more-page` / `settings-page` branches only
+    gained `(ctx)` on the enter hooks).
+- **Migration-contract rule #10** (Group 6d): **Settings page → `ui/components/settings`
+  module.** Any future extracted module that needs to gate on the persisted
+  experience mode, switch themes, or present the destructive Developer-warning
+  dialog imports from `ui.components.settings` and passes `ctx` — never
+  reaches into `ui.experience` `set_experience`/`mark_dev_warning_seen`
+  primitives directly (those are the low-level persistence layer; the
+  Settings module is the UI layer above them). **More hub → `ui/components/more`
+  module.** Hub items, hub navigation handlers (other than the homepage
+  AppBar's `nav_more`), and the "Clear all storage" destructive flow all live
+  in `more.py`; the View is registered in `ctx.controls["more_page"]` so
+  `more_enter(ctx)` can mutate it without an explicit arg.
+- **INVARIANTS preserved**: `homepage.controls[-1]` still the wallets list
+  (no homepage change); `more_page` / `settings_page` built once at bootstrap
+  at the same code location; `route_change` `more-page` / `settings-page`
+  branches byte-identical except for the `(ctx)` arg; the destructive
+  Developer-warning dialog still uses `modal=True` (barrier-click / Escape
+  can't dismiss it without an action — preserves the Phase-3 desync-prevention
+  fix); `clear_storage_click`'s confirmation dialog still uses `actions`-driven
+  Cancel/Clear-everything (barrier-click is a no-op); the destructive
+  `_do_clear_storage` still calls `clear_client_storage(ctx)` from
+  `ui.security_gate` + pushes the home route; `solana/` untouched; existing
+  `data`-dict contracts untouched (this group has none); per-session state
+  isolation preserved (no module-level mutable state — `more_enter` defines
+  its `nav_*` closures inside itself, fresh per-call).
+- **Key symbols** (`src/main.py` — re-grep, line numbers drift): import
+  `from ui.components.more import build_more_page, more_enter` /
+  `from ui.components.settings import build_settings_page, settings_enter`
+  (~L72-73); trimmed `from ui.experience import feature, get_experience`
+  (~L31); trimmed `from ui.security_gate import auto_lock_watcher,
+  refresh_lock_state` (no more `clear_client_storage` — ~L80); migration
+  marker block (~L1148 + ~L1200); `more_page = build_more_page(ctx)` +
+  `settings_page = build_settings_page(ctx)` (~L1508); route_change
+  `more-page` → `await more_enter(ctx)` / `settings-page` →
+  `await settings_enter(ctx)` (~L1300-1305); `nav_more` definition
+  (~L1212); homepage AppBar "More" action icon `on_click=nav_more`
+  (~L1386).
+- **VERIFIED**: `py_compile` on all 3 files; `git diff --check` clean.
+  Existing offline suites green (`test_address_check` 35, `test_sns` 11,
+  `test_history_csv`, `test_spam_filter` 31, `test_priority_fee`,
+  `test_burn_close`, `test_liquid_staking`, `test_wc2_integration`,
+  `test_wallet_create_ui` 39, `test_transfer_ui` 49, `test_swap_ui`,
+  `test_security_gate_ui` 62). **NEW** `tests/test_settings_ui.py` (**26
+  checks**): build_settings_page View structure + chrome wiring; the three
+  long-lived controls registered + present in the View; initial dropdown
+  value SIMPLE + options cover all 3 modes + description matches Simple
+  text; theme label reflects page.theme_mode at build time (light vs dark);
+  settings_enter reads persisted mode (pro/unknown/missing all handled);
+  switch-to-Pro persistence round-trip; mark_dev_warning_seen /
+  has_seen_dev_warning storage round-trip. **NEW** `tests/test_more_ui.py`
+  (**50 checks**): `_hub_item` pure builder (with + without badge);
+  `build_more_page` View structure + `ctx.controls["more_page"]` registry;
+  `more_enter` per-mode gating (Simple→Tools only; Pro→WEB3+Tools;
+  Developer→WEB3+Tools+Developer with all 5 dev tools); rebuild replaces
+  the Column wrapper on a mode change; `clear_storage_click` shows a
+  confirmation dialog without wiping; `_do_clear_storage` wipes every key
+  + pushes the home route + shows the "cleared" dialog. End-to-end via
+  Playwright (web mode, PIN `1234`, app was previously set to Pro mode):
+  app **boots clean, 0 console errors**; unlock → homepage renders W1
+  card; **More** AppBar action → `more-page` renders WEB3 & DeFi (Connect
+  dApp / NFT Gallery / Liquid Staking) + Tools (Address Book / Settings),
+  no Developer section (Pro mode gating intact); **Settings** hub item →
+  `settings-page` renders Appearance switch ("Light theme") + About block
+  + Experience level dropdown showing the Pro description (proving
+  `settings_enter(ctx)` read the persisted mode); **theme switch** flips
+  Light↔Dark with synced label; **Address Book** hub item navigates to
+  `addressbook-page` (proving the embedded `nav_addressbook(e)` closure
+  inside `more_enter` works end-to-end). 0 console errors across all
+  navigations.
 
 
 #### Phase 7 — Group 5: Transfer screens (SOL/SPL, burn/close)
