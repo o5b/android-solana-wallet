@@ -17,7 +17,6 @@ The three Views are returned to ``main.py`` which appends them in
 hook): the screens hold their state across navigations by design.
 """
 
-import asyncio
 import json
 import random
 from datetime import datetime
@@ -431,7 +430,7 @@ async def build_wallet_pages(ctx) -> tuple:
             content=flet.Column(
                 [
                     flet.Text("Error:", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD),
-                    txt_recover_error,
+                    txt_add_address_error,
                 ]
             ),
             width=400,
