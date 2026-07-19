@@ -932,12 +932,13 @@ assert on the built control structure.
     6. Wallet cards + views (`homepage`/`more_page`/`settings_page`/`route_change`) —
     **IN PROGRESS**. Group 6a (wallet create/recover/add pages) DONE; Group 6b
     (swap page) DONE (see "Phase 7 — Group 6b: Swap page" below); Group 6c
-    (PIN gate + lock dialogs) DONE (see "Phase 7 — Group 6c: PIN gate + lock
-    dialogs" below); Group 6d (Settings + More hub + experience) DONE (see
-     "Phase 7 — Group 6d: Settings + More hub + experience" below); Group 6e
-     (balance + history + address page + wallet cards) DONE (see "Phase 7 —
-     Group 6e: Balance + history + address page + wallet cards" below);
-     sub-groups 6f (dev storage page) + 6g (final orchestrator) remain.
+     (PIN gate + lock dialogs) DONE (see "Phase 7 — Group 6c: PIN gate + lock
+     dialogs" below); Group 6d (Settings + More hub + experience) DONE (see
+      "Phase 7 — Group 6d: Settings + More hub + experience" below); Group 6e
+      (balance + history + address page + wallet cards) DONE (see "Phase 7 —
+      Group 6e: Balance + history + address page + wallet cards" below);
+      Group 6f (DevTools Storage inspector) DONE (see "Phase 7 — Group 6f:
+      Dev storage page" below); sub-group 6g (final orchestrator) remains.
 
 #### Phase 7 — Group 6a: Wallet create / recover / add pages
 UI-only extraction (committed `d9941c7` + review fix `f684894`). Lifted the
@@ -1894,7 +1895,118 @@ screen and handler that spins off the homepage wallet cards — into
     calls it default (returns `[url]`). Drift risk eliminated: if the
     address-page control order ever changes, only one place needs updating.
     Also introduces a module-level `_NETWORKS` tuple (3 `(name, url)` pairs)
-    so the URL literals aren't duplicated 6× across the file.
+     so the URL literals aren't duplicated 6× across the file.
+
+#### Phase 7 — Group 6f: Dev storage page
+UI-only extraction. Lifted the DevTools Storage inspector
+(`dev_tools_storage_list` + `storage_delete_button_click` closures + the
+`dev_storage_page` View) out of `main()` into the existing
+`src/ui/components/devtools.py` module (Group 2 — the page joins sim / rpc /
+raw-key as the fourth Developer-layer screen). `main.py` 575→**540** (−35
+lines); `devtools.py` 498→**596** (+98). The `solana/` business layer is
+untouched — the page only reads/writes `shared_preferences`.
+
+- **NEW** `build_dev_storage_page(ctx) -> flet.View` (`src/ui/components/devtools.py`):
+  the page View builder (route `dev-storage-page`, AppBar cyan, chrome via
+  `ctx.controls["view_pop"]` / `["navbar"]`). Binds the shared
+  `ctx.controls["el_dev_storage_page"]` Column that `dev_storage_enter(ctx)`
+  rebuilds on each visit — same pattern as `addressbook_enter` / `rawkey_enter`.
+- **NEW** `dev_storage_enter(ctx)` (`src/ui/components/devtools.py`): async,
+  (re)builds the keys/values ListView into `ctx.controls["el_dev_storage_page"]`.
+  Lists every `shared_preferences` key (via `get_keys('')`) with a per-row
+  `ElevatedButton("Delete", data=key)` + a `"i. key: value"` Text (1-indexed).
+  String values are JSON-decoded when possible (dicts / lists / numbers /
+  bools render as Python `repr`; non-JSON strings left byte-identical). Calls
+  `page.update()` at the end.
+- **NEW** `_dev_storage_delete_click(ctx, key)` (`src/ui/components/devtools.py`):
+  async, deletes one key + shows a status dialog + refreshes the list. Dialog
+  strings preserved byte-identically from the legacy closure
+  (`"{key} успешно удалён!"` on success; `"Во время удаления произошла ошибка!"`
+  + `print("Error deleted data from shared_preferences: {er}")` on error).
+  Calls `dev_storage_enter(ctx)` at the end to refresh the list (see the
+  latent-bug fix below).
+- **Latent-bug fix (the move naturally repairs it)**: the legacy
+  `dev_tools_storage_list()` was a bootstrap-only call (`dev_storage_page`
+  View's `controls=[..., await dev_tools_storage_list()]`), so the list was
+  built **once**. After a delete, the deleted entry stayed visible until full
+  app restart — `page.update()` re-rendered the unchanged ListView. The
+  migration to the `enter` pattern (rebuild on every visit) makes
+  `_dev_storage_delete_click` refresh the list immediately after each delete.
+  Verified end-to-end via Playwright: list went 7→6 entries right after a
+  delete + the success dialog.
+- **`main.py`** (575→540):
+  - **Imports**: added `build_dev_storage_page, dev_storage_enter` to the
+    `from ui.components.devtools import (...)` block (alphabetised). **Removed**
+    `import json` — the only `main.py` users were the storage-list closures
+    (the devtools module already imports `json` for the RPC + sim pages).
+  - **Register `ctx.controls["el_dev_storage_page"]`** next to the new
+    `el_dev_storage_page = flet.Column()` holder (right after
+    `el_rawkey_page` — Group 2's holder), so the page View (built by
+    `build_dev_storage_page(ctx)`) and `dev_storage_enter(ctx)` share one live
+    Column object.
+  - **Deleted closures** (~35 lines): `dev_tools_storage_list` +
+    `storage_delete_button_click` → a migration-marker comment block that also
+    documents the latent-bug fix.
+  - **View builder**: replaced the ~16-line
+    `dev_storage_page = flet.View(route="dev-storage-page", appbar=…, controls=[Text, await dev_tools_storage_list()])`
+    definition with `dev_storage_page = build_dev_storage_page(ctx)` (built
+    once at bootstrap at the same code location — `route_change`'s
+    `dev-storage-page` branch only gained `await dev_storage_enter(ctx)`
+    before `page.views.append(dev_storage_page)`).
+- **Migration-contract rule #12** (Group 6f): **DevTools Storage inspector →
+  `ui.components.devtools` module.** The page joins sim / rpc / raw-key as
+  the fourth Developer-layer screen, all owned by the same module. Any future
+  extracted module that needs to enumerate or wipe `shared_preferences` keys
+  imports from `ui.components.devtools` and passes `ctx` — never reaches into
+  `solana/` primitives directly (the storage layer is `shared_preferences`,
+  not blockchain). The More hub's "Clear all storage" destructive flow stays
+  in `ui.components.more` (it calls `clear_client_storage(ctx)` from
+  `ui.security_gate`); the Storage inspector is the read/delete-one view.
+- **INVARIANTS preserved**: `homepage.controls[-1]` still the wallets list
+  (no homepage change); `dev_storage_page` built once at bootstrap at the
+  same code location; `route_change`'s `dev-storage-page` branch
+  byte-identical except for the `await dev_storage_enter(ctx)` call; dialog
+  strings byte-identical (Russian text + f-string interpolation); per-row
+  `data=key` preserved (defense in depth — the lambda also captures `key` via
+  a default arg); `solana/` untouched; per-session state isolation preserved
+  (no module-level mutable state — the shared Column is the only state, and
+  it lives in `ctx.controls`); existing `data`-dict contracts untouched (this
+  group has none — Delete buttons carry `data=key` directly, not a dict).
+- **Key symbols** (`src/main.py` — re-grep, line numbers drift): import
+  `from ui.components.devtools import (build_dev_storage_page,
+  build_rawkey_page, build_rpc_page, build_sim_page, dev_storage_enter,
+  rawkey_enter)` (~L26); `ctx.controls["el_dev_storage_page"]` (~L166);
+  migration marker (~L228); `dev_storage_page = build_dev_storage_page(ctx)`
+  (~L446); `route_change` `dev-storage-page` branch (~L317).
+- **VERIFIED**: `py_compile` on all 3 files (`main.py` + `devtools.py` +
+  `tests/test_dev_storage_ui.py`); `git diff --check` clean. **NEW**
+  `tests/test_dev_storage_ui.py` (**50 checks**): `build_dev_storage_page`
+  View structure (route / AppBar cyan / chrome wiring / binds shared Column);
+  `dev_storage_enter` lists every key (1-indexed "i. key: value" Text + 1
+  Delete button per row), JSON-decodes string values (dict / str / int /
+  bool / non-JSON passthrough), empty-store edge case, rebuild clears
+  previous contents (no duplication), calls `page.update()`, Delete button
+  `data` carries the actual key, Delete button's lambda captures `key` via a
+  default arg. `_dev_storage_delete_click`: success path (key removed + 1
+  dialog shown + byte-identical Russian text + list refreshes to 1 row
+  fewer) and error path (`shared_preferences.remove` raises → stdout print
+  + 1 dialog + byte-identical error text + key preserved + list still
+  refreshes). Existing offline suites green (`test_balance_ui` 77,
+  `test_wallet_create_ui` 39, `test_transfer_ui` 49, `test_swap_ui`,
+  `test_security_gate_ui` 62, `test_settings_ui` 26, `test_more_ui` 50,
+  `test_address_check` 35, `test_sns` 11, `test_history_csv`,
+  `test_spam_filter` 31, `test_priority_fee`, `test_burn_close`,
+  `test_liquid_staking`, `test_wc2_integration`). End-to-end via Playwright
+  (Developer mode via JSON-encoded localStorage + new tab; PIN `1234`): app
+  **boots clean, 0 console errors**; unlock → homepage renders W1 card; More
+  hub shows all 4 Developer tools (Storage inspector / Simulation inspector /
+  Raw RPC inspector / Export raw keys); **Storage inspector** → page renders
+  header "Редактирование client_storage:" + 7 entries (wallet record /
+  addressbook / pin_salt / pin_verifier / theme_mode / ui.experience /
+  wc.project_id) all JSON-decoded correctly; **Delete** on `wc.project_id`
+  → success dialog "wc.project_id успешно удалён!" → list **refreshes from
+  7 to 6 entries** immediately (latent-bug fix verified end-to-end). 0
+  console errors across all interactions.
 
 ## Security reminders
 
