@@ -922,15 +922,84 @@ re-running the underlying `solana/` function. (4) Reusable headless recipe: mock
 assert on the built control structure.
 
 **Next groups** (suggested order, each = one commit, lowest coupling first):
-1. ~~Address book (`ab_*`, poisoning gate, contact picker)~~ — **DONE** (see "Phase 7 —
-   Group 1: Address book" below). 2. ~~Dev tools (sim/rpc/rawkey pages)~~ — **DONE** (see
-   "Phase 7 — Group 2: Dev tools" below, committed `651581a`). 3. ~~NFT gallery + Liquid
-   staking enter pages~~ — **DONE** (see "Phase 7 — Group 3" below, committed `8e2e309`).
-   4. ~~WalletConnect (`_wc_*`/`on_wc_*`)~~ — **DONE** (see "Phase 7 — Group 4:
-   WalletConnect" below, committed `c557166`). 5. Transfer screens (SOL/SPL,
-   burn/close) — **← NEXT**.
-   6. Wallet cards + views (`homepage`/`more_page`/`settings_page`/`route_change`) — the
-   orchestrators, done last.
+ 1. ~~Address book (`ab_*`, poisoning gate, contact picker)~~ — **DONE** (see "Phase 7 —
+    Group 1: Address book" below). 2. ~~Dev tools (sim/rpc/rawkey pages)~~ — **DONE** (see
+    "Phase 7 — Group 2: Dev tools" below, committed `651581a`). 3. ~~NFT gallery + Liquid
+    staking enter pages~~ — **DONE** (see "Phase 7 — Group 3" below, committed `8e2e309`).
+    4. ~~WalletConnect (`_wc_*`/`on_wc_*`)~~ — **DONE** (see "Phase 7 — Group 4:
+    WalletConnect" below, committed `c557166`). 5. ~~Transfer screens (SOL/SPL,
+    burn/close)~~ — **DONE** (see "Phase 7 — Group 5" below, committed `cea4188`).
+    6. Wallet cards + views (`homepage`/`more_page`/`settings_page`/`route_change`) —
+    **IN PROGRESS**. Group 6a (wallet create/recover/add pages) DONE; sub-groups 6b+
+    (swap / PIN gate / settings+More hub / balance+history+cards / final orchestrator)
+    remain.
+
+#### Phase 7 — Group 6a: Wallet create / recover / add pages
+UI-only extraction (in working tree, not yet committed). Lifted the three
+wallet-entry screens (Create New Wallet / Recover Wallet / Add Wallet Address)
+out of `main()` into `src/ui/components/wallet_create.py`. `main.py`
+2792→2194 (−598 lines). The `solana/` business layer is untouched.
+- **NEW** `src/ui/components/wallet_create.py` (663 lines): `build_wallet_pages(ctx)`
+  → `(create_wallet_page, recover_wallet_page, add_wallet_address_page)`. Each
+  View is built once at bootstrap; the form TextFields are created once and bound
+  into the views (values persist across navigations — legacy "global objects"
+  behaviour). All save / clear / copy handlers, the seed-phrase reveal+quiz
+  (`generate_new_solana_wallet_button`), the three success cards, and the three
+  error cards live inside `build_wallet_pages` as closures capturing their
+  fields. The only external state is `ctx.encrypt_for_storage`,
+  `ctx.controls["view_pop"]`, `ctx.controls["navbar"]`, `page.shared_preferences`
+  / `page.clipboard` / `page.show_dialog` / `page.update`.
+- **NEW** `AppContext.encrypt_for_storage(value)` (`ui/context.py`): mirrors the
+  legacy closure — passthrough when locked, `encrypt_wallet_secrets(value,
+  session["key"])` when unlocked. Added `encrypt_wallet_secrets` to the
+  `solana.security` import in `ui/context.py`. The legacy `encrypt_for_storage`
+  closure was deleted from `main.py`.
+- **`main.py`**: imports `build_wallet_pages`; removed `from
+  solana.create_wallet import create_solana_wallet` (now in the module) and
+  `import random` (only used by the seed-phrase quiz). Deleted the ~485-line
+  wallet-create handler block + 3 View definitions (lines 1513–1997 + 1920–1994
+  of the pre-edit file) → one migration-marker comment. The three Views are
+  built once at bootstrap via `create_wallet_page, recover_wallet_page,
+  add_wallet_address_page = await build_wallet_pages(ctx)` (placed at the same
+  code location the `recover_wallet_page = flet.View(...)` definition was);
+  `route_change`'s `create-wallet-page` / `recover-wallet-page` /
+  `add-wallet-address-page` branches stay byte-unchanged.
+- **Migration-contract rule #8** (Group 6a): **state-derived record-encryption
+  → `ctx.encrypt_for_storage`.** The legacy `encrypt_for_storage(value)`
+  closure depended on `is_unlocked()` + `session["key"]` +
+  `encrypt_wallet_secrets`. It's now an `AppContext` method, joining the
+  wallet-key accessors from Group 3 (`get_wallet_private_key` /
+  `has_wallet_private_key`). Future extracted modules persist wallets via
+  `ctx.encrypt_for_storage(value)`; the legacy closure stays deleted.
+- **INVARIANTS preserved**: `homepage.controls[-1]` still the wallets list; the
+  three wallet-entry Views built once at bootstrap at the same code location;
+  `route_change`'s three branches byte-unchanged; `solana/` untouched; form
+  fields still persist across navigations (no enter-hook, no per-visit rebuild
+  — the screens hold state by design); `data`-dict contracts untouched (this
+  group has none — all data is form-field value reads); PIN gate unchanged.
+- **Key symbols** (`src/main.py` — re-grep, line numbers drift): import
+  `from ui.components.wallet_create import build_wallet_pages` (~L94);
+  migration marker (~L1512); `create_wallet_page, recover_wallet_page,
+  add_wallet_address_page = await build_wallet_pages(ctx)` (~L1920).
+- **VERIFIED**: `py_compile` on all 3 files; `git diff --check` clean. Headless
+  (`tests/test_wallet_create_ui.py`, 39 checks): `ctx.encrypt_for_storage`
+  (locked passthrough + unlocked Fernet round-trip + watch-only marker
+  preservation), `build_wallet_pages` structure (3 distinct Views, routes,
+  navbar wiring, all form TextFields present, distinct field objects per page),
+  save persistence round-trip (encrypt → set `wallet.<key>` → reload → Fernet
+  decrypt). Existing offline suites green: `test_address_check` (35),
+  `test_sns` (11), `test_history_csv`, `test_spam_filter` (31),
+  `test_transfer_ui` (49), `test_priority_fee`, `test_burn_close`,
+  `test_liquid_staking`, `test_wc2_integration`. End-to-end via Playwright (Pro
+  mode, PIN `1234`, pre-existing W1 watch-only): app **boots clean, 0 console
+  errors**; unlock → homepage renders W1 card; **New Wallet** button →
+  `create-wallet-page` renders with all form fields; **Recover Wallet** button →
+  `recover-wallet-page` renders; **Add Wallet Address** button →
+  `add-wallet-address-page` renders; entering a name + **Create New Wallet**
+  triggers the seed-phrase reveal dialog (proving `generate_new_solana_wallet_button`
+  runs end-to-end in the extracted module and `create_solana_wallet()` returned
+  successfully).
+
 
 #### Phase 7 — Group 5: Transfer screens (SOL/SPL, burn/close)
 UI-only extraction (committed). Lifted the SOL transfer page, the SPL transfer

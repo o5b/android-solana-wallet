@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 
 import flet
 
-from solana.security import get_secret
+from solana.security import encrypt_wallet_secrets, get_secret
 
 
 @dataclass
@@ -106,3 +106,15 @@ class AppContext:
     def has_wallet_private_key(self, wallet: dict) -> bool:
         """True when a usable (decrypted) private key is available for `wallet`."""
         return bool(self.get_wallet_private_key(wallet))
+
+    def encrypt_for_storage(self, value: dict) -> dict:
+        """Encrypt a wallet record's secrets before persistence.
+
+        Mirrors the legacy ``encrypt_for_storage`` closure in ``main.py``: when
+        the session is unlocked (a PIN is active) secrets are encrypted with the
+        in-memory Fernet key; otherwise the record is returned unchanged and is
+        migrated to ciphertext later once a PIN is established.
+        """
+        if self.is_unlocked():
+            return encrypt_wallet_secrets(value, self.session["key"])
+        return value
