@@ -1,46 +1,27 @@
-from datetime import datetime
 import asyncio
-import time
-import os
-import flet
-import base64
 import json
-import io
-import qrcode
+import time
+
+import flet
 
 # create_solana_wallet -> used by ui.components.wallet_create (Phase 7 Group 6a).
-from solana.balance import get_sol_spl_balance
+# get_sol_spl_balance / enrich_balance_result_with_prices / fmt_usd / fmt_change /
+# enrich_balance_result_with_spam_filter / is_hidden_spam / is_suspicious /
+# get_transaction_history / transaction_history_to_csv / feature / get_experience /
+# WATCH_ONLY_FIELD / short_addr -> moved to ui.components.balance (Phase 7 Group 6e)
+# and earlier modules. main.py no longer uses them directly.
 # transfer / burn / airdrop / SNS / signing-key helpers live in
 # ui.components.transfer (Phase 7); main.py no longer uses them directly.
 # jup_get_quote / jup_swap -> moved to ui.components.swap (Phase 7 Group 6b).
-from solana.prices import enrich_balance_result_with_prices, fmt_usd, fmt_change
-from solana.spam_filter import (
-    enrich_balance_result_with_spam_filter,
-    is_hidden_spam,
-    is_suspicious,
-)
-# is_valid_amount -> moved to ui.components.swap (Phase 7 Group 6b).
-from solana.transaction_history import get_transaction_history
-from solana.history_csv import transaction_history_to_csv
-from solana.security import WATCH_ONLY_FIELD
-# Experience registry: feature() + get_experience() stay here (they're used by
-# the balance + history handlers in Group 6e). The Settings selector + the
-# dev-warning dialog + set/has_seen/mark helpers -> moved to
-# ui/components/settings.py (Phase 7 Group 6d).
-from ui.experience import feature, get_experience
+# make_poisoning_banner / update_poisoning_banner / open_contact_picker /
+# open_save_contact_dialog / maybe_block_for_poisoning -> moved to
+# ui.components.transfer (Phase 7 Group 5); only addressbook_enter is still
+# wired here (route_change).
 from ui.context import AppContext
-from ui.formatting import short_addr as _short_addr
-from ui.components.priority_fee import (
-    make_priority_fee_block,
-    pf_from_data as _pf_from_data,
-)
-from ui.components.addressbook import (
-    make_poisoning_banner,
-    update_poisoning_banner,
-    open_contact_picker,
-    open_save_contact_dialog,
-    maybe_block_for_poisoning as _maybe_block_for_poisoning,
-    addressbook_enter,
+from ui.components.addressbook import addressbook_enter
+from ui.components.balance import (
+    build_address_page,
+    get_wallets_cards,
 )
 from ui.components.devtools import (
     build_sim_page,
@@ -53,22 +34,11 @@ from ui.components.staking import lst_enter
 from ui.components.transfer import (
     build_spl_token_page,
     build_token_page,
-    burn_and_close_click,
-    burn_spl_click,
-    go_to_spl_token_page_click,
-    go_to_token_page_click,
     open_spl_token_page,
-    request_airdrop_click,
-    resolve_recipient_input,
-    resolve_signing_key,
-    spl_token_arrow_drop_down_click,
-    spl_token_arrow_drop_up_click,
-    transfer_sol_click,
-    transfer_spl_click,
 )
 from ui.components.walletconnect import build_wc_page, wc_enter
 from ui.components.wallet_create import build_wallet_pages
-from ui.components.swap import build_swap_page, go_to_swap_page_click
+from ui.components.swap import build_swap_page
 from ui.components.more import build_more_page, more_enter
 from ui.components.settings import build_settings_page, settings_enter
 # clear_client_storage -> moved to ui/components/more.py (Phase 7 Group 6d):
@@ -78,27 +48,13 @@ from ui.security_gate import (
     refresh_lock_state,
 )
 
-
-def generate_qr_base64(data: str, box_size: int = 8, border: int = 2) -> str:
-    qr = qrcode.QRCode(
-        version=None,
-        error_correction=qrcode.constants.ERROR_CORRECT_M,
-        box_size=box_size,
-        border=border,
-    )
-    qr.add_data(data)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return base64.b64encode(buf.getvalue()).decode()
-
 # LAMPORT_TO_SOL_RATIO = 10 ** 9
 
 # SWAP_TOKENS (mainnet token registry) -> moved to ui.components.swap
-# (Phase 7 Group 6b). MAINNET_RPC stays here: it's also used by the
-# balance-screen "Swap" button's `disabled=` flag.
-MAINNET_RPC = "https://api.mainnet-beta.solana.com"
+# (Phase 7 Group 6b). MAINNET_RPC -> moved to ui.components.balance (Phase 7
+# Group 6e); every ui/ module that needs it (balance / swap / staking / nft /
+# devtools) carries its own local constant now, so main.py no longer defines
+# it.
 
 async def main(page: flet.Page):
     page.scroll = flet.ScrollMode.AUTO
@@ -151,6 +107,12 @@ async def main(page: flet.Page):
         pin_verifier_key=PIN_VERIFIER_KEY,
         auto_lock_seconds=AUTO_LOCK_SECONDS,
     )
+    # The CSV file picker is used by the Developer-mode "Save History as CSV"
+    # button (history handler in ui/components/balance.py). It must be appended
+    # to ``page.services`` (above) for the picker to actually render; we also
+    # expose it via ctx.controls so the extracted handler reaches it without a
+    # dependency on main.py.
+    ctx.controls["csv_file_picker"] = csv_file_picker
 
     # make_priority_fee_block / _pf_from_data -> moved to ui/components/priority_fee.py (Phase 7).
     # resolve_signing_key -> moved to ui/components/transfer.py (Phase 7 Group 5).
@@ -158,99 +120,26 @@ async def main(page: flet.Page):
     # has_wallet_private_key / encrypt_for_storage / decrypt_for_display) ->
     # all moved to AppContext (Phase 7 Group 6c); main.py call sites use ctx.*.
 
-    async def get_storage_data(prefix=''):
-        data_list = []
-        keys = await page.shared_preferences.get_keys(prefix)
-        print(f'keys: {keys}')
-        for key in keys:
-            val = await page.shared_preferences.get(key)
-            if isinstance(val, str):
-                try:
-                    val = json.loads(val)
-                except json.JSONDecodeError:
-                    pass
-            if isinstance(val, dict):
-                val['storage_key'] = key
-            data_list.append(val)
-        print(f'data_list: {data_list}')
-        return data_list
-
-    # ===================== Address book + poisoning protection =====================
-    # Address book, contact dialogs, the live poisoning banner, the blocking
-    # poisoning gate, and `_short_addr` -> moved to ui/components/addressbook.py
-    # (+ ui/formatting.py). The Address Book page control is registered in
-    # `ctx.controls["el_address_book"]`. `resolve_recipient_input` (SNS helper)
-    # -> moved to ui/components/transfer.py (Phase 7 Group 5).
-
-    async def get_wallets_cards():
-        wallets = await get_storage_data(prefix="wallet.")
-        print(f'wallets: {wallets}')
-        lv = flet.ListView(expand=1, spacing=10, padding=20, auto_scroll=True)
-        for wallet in wallets:
-            lv.controls.append(
-                flet.Card(
-                    content=flet.Container(
-                        content=flet.Column(
-                            [
-                                flet.Text(
-                                    "Wallet Name: ",
-                                    size=16,
-                                    font_family="Georgia",
-                                    # weight=flet.FontWeight.BOLD,
-                                    text_align=flet.TextAlign.RIGHT,
-                                    spans=[
-                                        flet.TextSpan(f'{wallet['name']}', flet.TextStyle(size=12, weight=flet.FontWeight.BOLD,)),
-                                    ],
-                                ),
-                                flet.Text(
-                                    "Wallet Description: ",
-                                    size=16,
-                                    font_family="Georgia",
-                                    # weight=flet.FontWeight.BOLD,
-                                    text_align=flet.TextAlign.RIGHT,
-                                    spans=[
-                                        flet.TextSpan(f'{wallet['description']}', flet.TextStyle(size=12, weight=flet.FontWeight.BOLD,)),
-                                    ],
-                                ),
-                                flet.Text(
-                                    "Address: ",
-                                    size=16,
-                                    font_family="Georgia",
-                                    # weight=flet.FontWeight.BOLD,
-                                    selectable=True,
-                                    spans=[
-                                        flet.TextSpan(f'{wallet['address_base58']}', flet.TextStyle(size=12, weight=flet.FontWeight.BOLD,)),
-                                    ]
-                                ),
-                                flet.Text(
-                                    "Watch-only (no private key)",
-                                    size=11, color="orange", weight=flet.FontWeight.BOLD,
-                                    visible=bool(wallet.get(WATCH_ONLY_FIELD)),
-                                ),
-                                flet.Divider(thickness=1),
-                                flet.Row(
-                                    [
-                                        flet.ElevatedButton(
-                                            content=flet.Text("Show More"),
-                                            on_click=go_to_address_page,
-                                            data=wallet,
-                                        ),
-                                        # flet.Text("Real Network", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD),
-                                    ],
-                                    alignment=flet.MainAxisAlignment.START,
-                                ),
-                                # flet.Column([]),
-                            ]
-                        ),
-                        width=400,
-                        padding=10,
-                    )
-                )
-            )
-        return lv
+    # ===================== Wallet cards + balance + history + address page ====
+    # get_storage_data / get_wallets_cards / delete_wallet_click /
+    # wallet_info_click / show_qr_click / go_to_address_page /
+    # get_history_button_click / get_balance_button_click + the address-page
+    # View builder -> moved to ui/components/balance.py (Phase 7 Group 6e).
+    # `generate_qr_base64` -> moved to ui/qr.py (pure helper, no flet dep).
+    # The two shared Columns (``el_address_page`` / ``el_token_balance_data``)
+    # are still created here and registered in ctx.controls; the address-page
+    # View (built by ``build_address_page(ctx)``) binds ``el_address_page``
+    # directly, and the handlers mutate both Columns through ctx.controls.
 
     el_address_page = flet.Column()
     el_token_balance_data = flet.Column()
+    # Register the shared controls with ctx so the extracted balance module
+    # (Phase 7 Group 6e) can read/mutate them. The `address_page` view built
+    # by ``build_address_page(ctx)`` binds ``el_address_page`` directly;
+    # ``el_token_balance_data`` is appended to ``el_address_page`` by
+    # ``go_to_address_page`` and repopulated by the balance/history handlers.
+    ctx.controls["el_address_page"] = el_address_page
+    ctx.controls["el_token_balance_data"] = el_token_balance_data
     el_address_book = flet.Column()
     # Register the shared control with ctx so the extracted address-book module
     # can rebuild it (Phase 7). The `addressbook_page` view below still binds
@@ -269,848 +158,19 @@ async def main(page: flet.Page):
     # object directly.
     ctx.controls["el_rawkey_page"] = el_rawkey_page
 
-    async def delete_wallet_click(e):
-        wallet = e.control.data
-        if 'storage_key' in wallet:
-            await page.shared_preferences.remove(wallet['storage_key'])
-            page.show_dialog(flet.AlertDialog(title=flet.Text("Wallet deleted successfully!")))
-            await page.push_route("/")
-
-    async def wallet_info_click(e):
-        wallet = e.control.data
-
-        def close_dlg(e):
-            dlg_info.open = False
-            page.update()
-
-        async def save_info(e):
-            if 'storage_key' in wallet:
-                wallet['name'] = tf_name.value
-                wallet['description'] = tf_desc.value
-                await page.shared_preferences.set(wallet['storage_key'], json.dumps(wallet))
-                dlg_info.open = False
-                page.update()
-                await page.push_route("/")
-
-        async def copy_data(e):
-            copy_src = ctx.decrypt_for_display(wallet)
-            copy_val = {k: v for k, v in copy_src.items() if k != 'storage_key'}
-            await page.clipboard.set(json.dumps(copy_val, indent=2))
-
-        tf_name = flet.TextField(label="Name", value=wallet.get('name', ''))
-        tf_desc = flet.TextField(label="Description", value=wallet.get('description', ''), multiline=True)
-
-        # Decrypt secrets on demand (records are stored encrypted once a PIN exists).
-        w_dec = ctx.decrypt_for_display(wallet)
-        watch_only_tag = "  (watch-only)" if wallet.get(WATCH_ONLY_FIELD) else ""
-        info_text = f"Address: {wallet.get('address_base58')}\n" \
-                    f"Created: {wallet.get('created')}{watch_only_tag}\n" \
-                    f"Private Key: {w_dec.get('private_key_hex')}\n" \
-                    f"Public Key: {w_dec.get('public_key_hex')}\n" \
-                    f"Words: {w_dec.get('words')}\n" \
-                    f"Secret Key (base58): {w_dec.get('secret_key_base58')}"
-
-        dlg_info = flet.AlertDialog(
-            title=flet.Text("Wallet Info"),
-            content=flet.Column([
-                tf_name,
-                tf_desc,
-                flet.Row(
-                    [
-                        flet.Image(
-                            src=await asyncio.to_thread(generate_qr_base64, wallet.get('address_base58', '')),
-                            width=140,
-                            height=140,
-                            fit=flet.BoxFit.CONTAIN,
-                            border_radius=flet.border_radius.all(8),
-                        ),
-                    ],
-                    alignment=flet.MainAxisAlignment.CENTER,
-                ),
-                flet.Text(info_text, selectable=True, size=12),
-                flet.ElevatedButton("Copy All Data", on_click=copy_data, icon=flet.Icons.COPY)
-            ], scroll=flet.ScrollMode.AUTO, height=400),
-            actions=[
-                flet.TextButton("Save", on_click=save_info),
-                flet.TextButton("Cancel", on_click=close_dlg)
-            ],
-            actions_alignment=flet.MainAxisAlignment.END
-        )
-        page.show_dialog(dlg_info)
-
-    async def show_qr_click(e):
-        address = e.control.data
-
-        def close_qr_dlg(ev):
-            dlg_qr.open = False
-            page.update()
-
-        qr_b64 = await asyncio.to_thread(generate_qr_base64, address)
-        dlg_qr = flet.AlertDialog(
-            title=flet.Text("Receive SOL", text_align=flet.TextAlign.CENTER),
-            content=flet.Column(
-                [
-                    flet.Image(
-                        src=qr_b64,
-                        width=280,
-                        height=280,
-                        fit=flet.BoxFit.CONTAIN,
-                    ),
-                    flet.Text(address, selectable=True, size=11, text_align=flet.TextAlign.CENTER),
-                ],
-                horizontal_alignment=flet.CrossAxisAlignment.CENTER,
-                tight=True,
-            ),
-            actions=[
-                flet.TextButton("Close", on_click=close_qr_dlg),
-            ],
-            actions_alignment=flet.MainAxisAlignment.CENTER,
-        )
-        page.show_dialog(dlg_qr)
-
-    async def go_to_address_page(e):
-        print(f'****** go_to_address_page e.control.data: {e.control.data}')
-        wallet = e.control.data
-        qr_b64 = await asyncio.to_thread(generate_qr_base64, wallet["address_base58"])
-        el_address_page.controls = [
-            flet.Row(
-                [
-                    flet.IconButton(icon=flet.Icons.INFO, tooltip="Wallet Info", on_click=wallet_info_click, data=wallet),
-                    flet.IconButton(icon=flet.Icons.DELETE, tooltip="Delete Wallet", on_click=delete_wallet_click, data=wallet, icon_color="red"),
-                ],
-                alignment=flet.MainAxisAlignment.END
-            ),
-            flet.Row(
-                [
-                    flet.Text(
-                        "Wallet Name: ",
-                        size=16,
-                        font_family="Georgia",
-                        text_align=flet.TextAlign.RIGHT,
-                        spans=[
-                            flet.TextSpan(f'{wallet["name"]}', flet.TextStyle(size=12, weight=flet.FontWeight.BOLD,)),
-                        ],
-                    ),
-                ]
-            ),
-            flet.Row(
-                [
-                    flet.Text(
-                        "Wallet Description: ",
-                        size=16,
-                        font_family="Georgia",
-                        text_align=flet.TextAlign.RIGHT,
-                        spans=[
-                            flet.TextSpan(f'{wallet["description"]}', flet.TextStyle(size=12, weight=flet.FontWeight.BOLD,)),
-                        ],
-                    ),
-                ]
-            ),
-            flet.Row(
-                [
-                    flet.Text(
-                        "",
-                        font_family="Georgia",
-                        selectable=True,
-                        text_align=flet.TextAlign.RIGHT,
-                        spans=[
-                            flet.TextSpan('Created: ', flet.TextStyle(size=16)),
-                            flet.TextSpan(f'{wallet["created"]}', flet.TextStyle(size=12, weight=flet.FontWeight.BOLD,)),
-                        ]
-                    ),
-                ]
-            ),
-            flet.Row(
-                [
-                    flet.Text(
-                        'Address: ',
-                        size=16,
-                        text_align=flet.TextAlign.RIGHT,
-                        font_family="Georgia",
-                    ),
-                ]
-            ),
-            flet.Row(
-                [
-                    flet.Text(
-                        f'{wallet["address_base58"]}',
-                        size=12,
-                        font_family="Georgia",
-                        weight=flet.FontWeight.BOLD,
-                        text_align=flet.TextAlign.RIGHT,
-                        selectable=True,
-                    ),
-                ]
-            ),
-            flet.Row(
-                [
-                    flet.Image(
-                        src=qr_b64,
-                        width=160,
-                        height=160,
-                        fit=flet.BoxFit.CONTAIN,
-                        border_radius=flet.border_radius.all(8),
-                    ),
-                ],
-                alignment=flet.MainAxisAlignment.CENTER,
-            ),
-            flet.Row(
-                [
-                    flet.ElevatedButton(
-                        content=flet.Text("Show QR Code"),
-                        icon=flet.Icons.QR_CODE_2,
-                        on_click=show_qr_click,
-                        data=wallet["address_base58"],
-                    ),
-                    flet.IconButton(
-                        icon=flet.Icons.CONTENT_COPY,
-                        tooltip="Copy Address",
-                        on_click=lambda e: page.clipboard.set(wallet["address_base58"]),
-                    ),
-                ],
-                alignment=flet.MainAxisAlignment.CENTER,
-            ),
-            flet.Divider(thickness=2),
-            flet.Row([flet.Text("Solana Networks:", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD),]),
-            flet.Row(
-                [
-                    flet.Column(
-                        [
-                            flet.Checkbox(label="mainnet-beta (real network)", value=True),
-                            flet.Checkbox(label="testnet (not a real network)", value=False),
-                            flet.Checkbox(label="devnet (not a real network)", value=False),
-                        ]
-                    ),
-                ],
-                alignment=flet.MainAxisAlignment.START,
-            ),
-            flet.Row(
-                [
-                    flet.ElevatedButton(
-                        content=flet.Text("Show History"),
-                        on_click=get_history_button_click,
-                        data=wallet,
-                    ),
-                    flet.ElevatedButton(
-                        content=flet.Text("Show Balance"),
-                        on_click=get_balance_button_click,
-                        # data=wallet['address_base58'],
-                        data=wallet,
-                    ),
-                ],
-                alignment=flet.MainAxisAlignment.END,
-            ),
-            el_token_balance_data,
-        ]
-        await page.push_route("address-page")
-
-    async def get_history_button_click(e):
-        try:
-            wallet = e.control.data
-            print(f'****** address >> get_history_button_click: {wallet}')
-            el_token_balance_data.controls.clear()
-            page.update()
-
-            networks = []
-            # Собираем выбранные сети аналогично балансу
-            if e.control.parent.parent.controls[-3].controls[0].controls[0].value:
-                networks.append(("mainnet-beta", "https://api.mainnet-beta.solana.com"))
-            if e.control.parent.parent.controls[-3].controls[0].controls[1].value:
-                networks.append(("testnet", "https://api.testnet.solana.com"))
-            if e.control.parent.parent.controls[-3].controls[0].controls[2].value:
-                networks.append(("devnet", "https://api.devnet.solana.com"))
-
-            e.control.disabled = True   # блокируем кнопку
-            el_token_balance_data.controls.append(
-                flet.Row([flet.ProgressRing(), flet.Text("LOADING HISTORY...")], alignment=flet.MainAxisAlignment.CENTER)
-            )
-            page.update()
-
-            tmp_history_result = [flet.Divider(thickness=3)]
-            csv_history = []
-
-            # Progressive disclosure (Phase 5):
-            # - Simple   -> header only (time/type/amount/status), no expandable details.
-            # - Pro      -> + expandable Signature/Status/Fee.
-            # - Developer -> + Slot/Version/CU + logs + CSV export button.
-            _mode = await get_experience(page)
-            show_detail = feature("history_detail", _mode)
-            show_tech = feature("history_tech", _mode)
-            show_csv = feature("csv_export", _mode)
-
-            for net_name, net_url in networks:
-                tmp_history_result.append(
-                    flet.Row([flet.Text(f'Network: {net_name}', size=16, weight=flet.FontWeight.BOLD)])
-                )
-
-                # Запрашиваем историю
-                history_data = await get_transaction_history(wallet['address_base58'], net_url)
-
-                if "error" in history_data:
-                    tmp_history_result.append(flet.Text(f"Error: {history_data['error']}", color="red"))
-                elif "result" in history_data and history_data["result"]:
-                    csv_history.append((net_name, history_data["result"]))
-                    for tx in history_data["result"]:
-                        time_str = datetime.fromtimestamp(tx['block_time']).strftime('%Y-%m-%d %H:%M:%S') if tx['block_time'] else "Unknown"
-
-                        sol_change = tx.get('sol_change', 0)
-                        if sol_change > 0:
-                            change_color, change_sign = "green", "+"
-                        elif sol_change < 0:
-                            change_color, change_sign = "red", ""
-                        else:
-                            change_color = "black" if page.theme_mode == flet.ThemeMode.LIGHT else "white"
-                            change_sign = ""
-
-                        balance_spans = [
-                            flet.TextSpan(f"{change_sign}{sol_change:.9f} SOL", flet.TextStyle(size=14, color=change_color, weight=flet.FontWeight.BOLD))
-                        ]
-
-                        if "spl_changes" in tx and tx["spl_changes"]:
-                            for spl in tx["spl_changes"]:
-                                change = spl["change"]
-                                spl_color = "green" if change > 0 else "red"
-                                spl_sign = "+" if change > 0 else ""
-
-                                # Если символ найден, используем его, иначе режем mint адрес
-                                display_name = spl.get("symbol") or f"{spl['mint'][:4]}...{spl['mint'][-4:]}"
-
-                                balance_spans.append(
-                                    flet.TextSpan(f"\n{spl_sign}{change} ", flet.TextStyle(size=14, color=spl_color, weight=flet.FontWeight.BOLD))
-                                )
-                                balance_spans.append(
-                                    flet.TextSpan(f"{display_name}", flet.TextStyle(size=12, color="grey"))
-                                )
-
-                        # Изолированная функция для создания интерактивной карточки
-                        def create_tx_card(tx_data, t_str, b_spans):
-                            # Progressive disclosure: Simple = header only;
-                            # Pro = + expandable Signature/Status/Fee;
-                            # Developer = + Slot/Version/CU + logs.
-                            header_lines = [
-                                flet.Text(f"{t_str} • {tx_data.get('tx_type', 'Unknown')}", size=12, weight=flet.FontWeight.BOLD, color="grey700"),
-                                flet.Text(spans=b_spans),
-                            ]
-                            # Simple mode has no expandable details, so surface
-                            # the status directly under the amount.
-                            if not show_detail:
-                                header_lines.append(
-                                    flet.Text(
-                                        f"{'Success' if tx_data['success'] else 'Failed'}",
-                                        size=11,
-                                        color="green" if tx_data['success'] else "red",
-                                    )
-                                )
-
-                            if not show_detail:
-                                return flet.Card(
-                                    content=flet.Container(
-                                        padding=10,
-                                        content=flet.Column(header_lines),
-                                    )
-                                )
-
-                            details_inner = [
-                                flet.Divider(thickness=1),
-                                flet.Text(f"Signature: {tx_data['signature']}", selectable=True, size=12, italic=True),
-                                flet.Text(
-                                    f"Status: {'Success' if tx_data['success'] else 'Failed'} | Fee: {tx_data.get('fee', 0):.9f} SOL",
-                                    size=12,
-                                    color="green" if tx_data['success'] else "red"
-                                ),
-                            ]
-                            if show_tech:
-                                # Формируем логи в виде прокручиваемого списка
-                                logs_controls = [flet.Text("Logs:", size=12, weight=flet.FontWeight.BOLD)]
-                                if tx_data.get('logs'):
-                                    for log in tx_data['logs']:
-                                        # Подсвечиваем ошибки красным для удобства
-                                        log_color = "red" if "failed" in log.lower() or "error" in log.lower() else "grey"
-                                        logs_controls.append(flet.Text(f"• {log}", size=10, color=log_color, selectable=True))
-                                else:
-                                    logs_controls.append(flet.Text("No logs available", size=10, color="grey"))
-
-                                # Оборачиваем логи в Column с фиксированной высотой и скроллом
-                                logs_column = flet.Container(
-                                    content=flet.Column(logs_controls, spacing=2, scroll=flet.ScrollMode.AUTO),
-                                    height=100,
-                                    padding=5,
-                                    border=flet.border.all(1, "black12"),
-                                    border_radius=5
-                                )
-                                details_inner.append(
-                                    flet.Text(f"Slot: {tx_data.get('slot')} | Version: {tx_data.get('version')} | CU Consumed: {tx_data.get('compute_units')}", size=12, color="blue")
-                                )
-                                details_inner.append(logs_column)
-
-                            # Скрытая колонка с деталями
-                            details_col = flet.Column(visible=False, controls=details_inner)
-
-                            # Обработчик кнопки-стрелки
-                            def toggle_details(e):
-                                details_col.visible = not details_col.visible
-                                e.control.icon = flet.Icons.ARROW_DROP_UP if details_col.visible else flet.Icons.ARROW_DROP_DOWN
-                                e.control.update()
-                                details_col.update()
-
-                            return flet.Card(
-                                content=flet.Container(
-                                    padding=10,
-                                    content=flet.Column([
-                                        flet.Row([
-                                            flet.Column(header_lines, expand=True),
-                                            flet.IconButton(
-                                                icon=flet.Icons.ARROW_DROP_DOWN,
-                                                icon_size=30,
-                                                on_click=toggle_details
-                                            )
-                                        ], alignment=flet.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=flet.CrossAxisAlignment.START),
-                                        details_col
-                                    ])
-                                )
-                            )
-
-                        # Добавляем созданную интерактивную карточку в общий список
-                        tmp_history_result.append(create_tx_card(tx, time_str, balance_spans))
-
-                else:
-                    tmp_history_result.append(flet.Text("No transactions found.", italic=True))
-
-                tmp_history_result.append(flet.Divider(thickness=1))
-
-            if csv_history and show_csv:
-                csv_content = transaction_history_to_csv(csv_history)
-
-                async def export_history_csv_click(_):
-                    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                    saved_path = await csv_file_picker.save_file(
-                        dialog_title="Save transaction history CSV",
-                        file_name=f"solana-history-{timestamp}.csv",
-                        file_type=flet.FilePickerFileType.CUSTOM,
-                        allowed_extensions=["csv"],
-                        src_bytes=csv_content.encode("utf-8-sig"),
-                    )
-                    if saved_path:
-                        page.show_dialog(
-                            flet.AlertDialog(
-                                title=flet.Text("CSV saved"),
-                                content=flet.Text(f"Transaction history saved to:\n{saved_path}"),
-                            )
-                        )
-
-                tmp_history_result.insert(
-                    1,
-                    flet.Row(
-                        [
-                            flet.ElevatedButton(
-                                content=flet.Text("Save History as CSV"),
-                                icon=flet.Icons.DOWNLOAD,
-                                on_click=export_history_csv_click,
-                            ),
-                        ],
-                        alignment=flet.MainAxisAlignment.END,
-                    ),
-                )
-
-            el_token_balance_data.controls.clear()
-            el_token_balance_data.controls.extend(tmp_history_result)
-            e.control.disabled = False  # разблокируем кнопку
-
-        except Exception as er:
-            print(f'Error get_history_button_click: {er}')
-            page.show_dialog(
-                flet.AlertDialog(title=flet.Text("Error loading history!"))
-            )
-            e.control.disabled = False
-        finally:
-            page.update()
-
-    async def get_balance_button_click(e):
-        try:
-            wallet = e.control.data
-            print(f'****** address >> get_balance_button_click: {wallet}')
-            el_token_balance_data.controls.clear()
-            page.update()
-            networks = []       # ["mainnet-beta", "testnet", "devnet"]
-            if e.control.parent.parent.controls[-3].controls[0].controls[0].value:
-                # networks.append("mainnet-beta")
-                networks.append("https://api.mainnet-beta.solana.com")
-            if e.control.parent.parent.controls[-3].controls[0].controls[1].value:
-                # networks.append("testnet")
-                networks.append("https://api.testnet.solana.com")
-            if e.control.parent.parent.controls[-3].controls[0].controls[2].value:
-                # networks.append("devnet")
-                networks.append("https://api.devnet.solana.com")
-            print(f'networks: {networks}')
-            e.control.disabled = True   # блокируем кнопку
-            el_token_balance_data.controls.append(
-                flet.Row([flet.ProgressRing(), flet.Text("PLEASE WAIT")], alignment=flet.MainAxisAlignment.CENTER)
-            )
-            page.update()
-            tmp_balance_result = []
-            start = datetime.now()
-            # Progressive disclosure (Phase 5): SPL tokens, the spam filter and
-            # the raw token dump are Pro/Developer-only. Simple mode shows just
-            # the native SOL rows + the USD portfolio banner, so it also skips
-            # the slow per-token priority-fee RPC + raw image-byte downloads
-            # (same fast path as the NFT gallery). SOL USD pricing still works
-            # via the wrapped-SOL mint in enrich_balance_result_with_prices.
-            mode = await get_experience(page)
-            show_spl = feature("spl_tokens", mode)
-            result = await get_sol_spl_balance(
-                wallet['address_base58'], networks,
-                include_transfer_cost=show_spl,
-                include_image_bytes=show_spl,
-            )
-            print(f'****** get_sol_spl_balance result: {result}')
-
-            # USD pricing (Jupiter Price API v3). Values are attached only to
-            # mainnet entries — devnet/testnet holdings have no real value.
-            try:
-                price_info = await enrich_balance_result_with_prices(result)
-                print(f'****** price_info: {price_info}')
-            except Exception as price_er:
-                print(f'price enrichment skipped: {price_er}')
-                price_info = {"total_usd": 0.0, "priced": 0, "tokens": 0, "mainnet": False}
-
-            # Spam / scam token filter. Runs AFTER pricing so it can use the
-            # real-market-liquidity signal (token['usd_price']) to downgrade an
-            # isolated open-mint-authority hit. Hides confirmed spam, badges
-            # suspicious tokens. Never breaks balance display on failure.
-            # Skipped in Simple mode (no SPL tokens are rendered anyway).
-            spam_info = {"spam": 0, "suspicious": 0, "flagged": 0, "total": 0}
-            if show_spl:
-                try:
-                    spam_info = await enrich_balance_result_with_spam_filter(result)
-                    print(f'****** spam_info: {spam_info}')
-                except Exception as spam_er:
-                    print(f'spam enrichment skipped: {spam_er}')
-                    spam_info = {"spam": 0, "suspicious": 0, "flagged": 0, "total": 0}
-
-            for i, r in enumerate(result):
-                tmp_balance_spl = []
-                tmp_spam_spl = []
-                spam_token_count = 0
-
-                # Builds the (Transfer button + logo + amount text) + expand
-                # detail row pair for one token. Defined per-network so it can
-                # close over `wallet` and the current `r` without late-binding.
-                def _build_spl_token_controls(spl_token):
-                    token_symbol = ''
-                    if 'symbol_metaplex' in spl_token:
-                        token_symbol += f'{spl_token['symbol_metaplex']} (symbol_metaplex) '
-                    if 'symbol_2022' in spl_token:
-                        token_symbol += f'{spl_token['symbol_2022']} (symbol_2022)'
-                    spl_token_logo = flet.Image(
-                        width=100,
-                        height=100,
-                        src="spl-token-placeholder.png",
-                        fit=flet.BoxFit.CONTAIN,
-                        border_radius=flet.border_radius.all(10),
-                    )
-                    if 'logo' in spl_token and spl_token['logo']:
-                        spl_token_logo.src = spl_token['logo']
-                    # USD value spans (mainnet-priced tokens only)
-                    _spl_usd_spans = []
-                    if spl_token.get('usd_value') is not None:
-                        _spl_usd_spans.append(flet.TextSpan(
-                            f'   {fmt_usd(spl_token["usd_value"])}',
-                            flet.TextStyle(size=14, color=flet.Colors.GREY_700),
-                        ))
-                        if spl_token.get('change_24h') is not None:
-                            _chg = spl_token['change_24h']
-                            _spl_usd_spans.append(flet.TextSpan(
-                                f' {fmt_change(_chg)}',
-                                flet.TextStyle(
-                                    size=12,
-                                    color=flet.Colors.GREEN if _chg >= 0 else flet.Colors.RED,
-                                ),
-                            ))
-                    return [
-                        flet.Row(
-                            [
-                                flet.ElevatedButton(
-                                    content=flet.Text("Transfer this token"),
-                                    on_click=on_go_to_spl_token_page,
-                                    data={
-                                        'wallet_address': wallet['address_base58'],
-                                        'network': r['network'],
-                                        'spl_amount': spl_token['amount'],
-                                        'symbol': token_symbol,
-                                        'sol_amount': r['sol'],
-                                        'raw_data': spl_token,
-                                        'wallet_data': wallet,
-                                    },
-                                    # disabled=False if (r['sol'] and spl_token['amount']) else True,
-                                    disabled=False if (r['sol'] and spl_token['amount'] and r['sol'] > spl_token['transfer_cost']["total_sol"]) else True,
-                                ),
-                                spl_token_logo,
-                                flet.Text(
-                                    value='',
-                                    spans=[
-                                        flet.TextSpan(f'{spl_token['amount']}', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
-                                        flet.TextSpan(f' {token_symbol}', flet.TextStyle(size=16)),
-                                        *_spl_usd_spans,
-                                    ]
-                                ),
-                            ],
-                        ),
-                        flet.Column(
-                            [
-                                flet.Row(
-                                    [
-                                        flet.TextButton(
-                                            content=flet.Row(
-                                                [
-                                                    flet.Icon(flet.Icons.ARROW_DROP_DOWN, size=50),
-                                                ],
-                                            ),
-                                            on_click=on_spl_arrow_drop_down,
-                                            data={**{k: v for k, v in spl_token.items() if k not in ('logo', 'spam')}, 'network': r['network']},
-                                        ),
-                                    ],
-                                    alignment=flet.MainAxisAlignment.CENTER,
-                                ),
-                            ],
-                        ),
-                    ]
-
-                if show_spl:
-                    for spl_token in r['spl']:
-                        if spl_token['amount'] <= 0:
-                            continue
-                        # Confirmed-spam tokens are hidden behind a toggle; they
-                        # can still be inspected/shown, but don't clutter the list.
-                        if is_hidden_spam(spl_token):
-                            spam_token_count += 1
-                            tmp_spam_spl.extend(_build_spl_token_controls(spl_token))
-                            continue
-                        # Suspicious (not confirmed) tokens stay visible but are
-                        # badged with the detection reasons so the user is warned.
-                        if is_suspicious(spl_token):
-                            _sv = spl_token.get('spam') or {}
-                            _reasons = ', '.join(_sv.get('reasons') or []) or 'flagged as risky'
-                            tmp_balance_spl.append(
-                                flet.Row(
-                                    [
-                                        flet.Icon(flet.Icons.WARNING_AMBER_ROUNDED, color=flet.Colors.ORANGE, size=18),
-                                        flet.Text(f'Suspicious: {_reasons}', size=12, color=flet.Colors.ORANGE_800, selectable=True),
-                                    ],
-                                )
-                            )
-                        tmp_balance_spl.extend(_build_spl_token_controls(spl_token))
-
-                    # "N spam tokens hidden" expander. Hidden rows live in a column
-                    # that is shown on demand; the toggle carries the column ref in
-                    # its `data` so the handler needs no per-loop closure state.
-                    if tmp_spam_spl:
-                        _spam_col = flet.Column(controls=tmp_spam_spl, visible=False)
-
-                        async def _toggle_spam(e):
-                            col = e.control.data
-                            col.visible = not col.visible
-                            await page.update()
-
-                        tmp_balance_spl.extend([
-                            flet.Container(
-                                content=flet.TextButton(
-                                    on_click=_toggle_spam,
-                                    data=_spam_col,
-                                    content=flet.Row(
-                                        [
-                                            flet.Icon(flet.Icons.WARNING, color=flet.Colors.RED, size=18),
-                                            flet.Text(
-                                                f'{spam_token_count} spam token(s) hidden — click to show',
-                                                size=12, color=flet.Colors.RED,
-                                            ),
-                                        ],
-                                    ),
-                                ),
-                                padding=flet.padding.symmetric(vertical=2, horizontal=8),
-                                margin=flet.margin.only(top=4, bottom=4),
-                                bgcolor=flet.Colors.with_opacity(0.08, flet.Colors.RED),
-                                border_radius=flet.border_radius.all(8),
-                            ),
-                            _spam_col,
-                        ])
-                tmp_request_airdrop = []
-                if r['network'] == "https://api.testnet.solana.com" or r['network'] == "https://api.devnet.solana.com":
-                    tmp_request_airdrop.append(
-                        flet.ElevatedButton(
-                            content=flet.Text("Request Airdrop 1 SOL"),
-                            on_click=on_request_airdrop,
-                            data={
-                                'wallet_address': wallet['address_base58'],
-                                'network': r['network'],
-                                'sol_amount': r['sol'],
-                                'symbol': 'SOL',
-                                'wallet_data': wallet,
-                            },
-                            disabled=False,
-                        ),
-                    )
-                # USD value spans for native SOL (mainnet-priced rows only)
-                _sol_usd_spans = []
-                if r.get('sol_usd') is not None:
-                    _sol_usd_spans.append(flet.TextSpan(
-                        f'   {fmt_usd(r["sol_usd"])}',
-                        flet.TextStyle(size=14, color=flet.Colors.GREY_700),
-                    ))
-                    if r.get('sol_change_24h') is not None:
-                        _chg = r['sol_change_24h']
-                        _sol_usd_spans.append(flet.TextSpan(
-                            f' {fmt_change(_chg)}',
-                            flet.TextStyle(
-                                size=12,
-                                color=flet.Colors.GREEN if _chg >= 0 else flet.Colors.RED,
-                            ),
-                        ))
-                tmp_balance_result.extend(
-                    [
-                        flet.Row(
-                            [
-                                flet.Text(
-                                    value='',
-                                    spans=[flet.TextSpan(f'Network: {r['network']}', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD))]
-                                ),
-                            ],
-                        ),
-                        flet.Row(
-                            [
-                                flet.ElevatedButton(
-                                    content=flet.Text("Transfer this token"),
-                                    on_click=on_go_to_token_page,
-                                    data={
-                                        # 'wallet_address': e.control.data,
-                                        'wallet_address': wallet['address_base58'],
-                                        'network': r['network'],
-                                        'sol_amount': r['sol'],
-                                        'symbol': 'SOL',
-                                        'wallet_data': wallet,
-                                    },
-                                    disabled=False if r['sol'] else True,
-                                ),
-                                flet.ElevatedButton(
-                                    content=flet.Text("Swap"),
-                                    on_click=on_go_to_swap_page,
-                                    data={
-                                        'wallet_address': wallet['address_base58'],
-                                        'network': r['network'],
-                                        'sol_amount': r['sol'],
-                                        'wallet_data': wallet,
-                                    },
-                                    disabled=(r['network'] != MAINNET_RPC) or (not r['sol']),
-                                ),
-                                flet.Text(
-                                    value='',
-                                    spans=[
-                                        flet.TextSpan(f'{r['sol']}', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
-                                        flet.TextSpan(' SOL', flet.TextStyle(size=16)),
-                                        *_sol_usd_spans,
-                                    ]
-                                ),
-                                *tmp_request_airdrop,
-                            ],
-                        ),
-                        *tmp_balance_spl,
-                    ]
-                )
-                if i < len(result) - 1: # добавляем разделяющую линию после каждого результата кроме последнего
-                    tmp_balance_result.append(flet.Divider(thickness=1))
-            el_token_balance_data.controls.clear()
-            _balance_controls = [flet.Divider(thickness=3)]
-            # Portfolio value banner (mainnet holdings only). In Simple mode
-            # SPL rows are hidden, so the banner must reflect native SOL only
-            # (otherwise it advertises value the user cannot see). sol_usd is
-            # only attached to mainnet entries by enrich_balance_result_with_prices.
-            _banner_total = price_info.get('total_usd', 0.0)
-            _note = ''
-            if not show_spl:
-                _banner_total = sum(nr.get('sol_usd') or 0.0 for nr in result)
-            else:
-                _priced = price_info.get('priced', 0)
-                _tokens = price_info.get('tokens', 0)
-                _note = '' if _priced or not _tokens else ' (no priced tokens)'
-            if price_info.get('mainnet') and _banner_total:
-                _balance_controls.append(
-                    flet.Container(
-                        content=flet.Row(
-                            [
-                                flet.Text(
-                                    value='',
-                                    spans=[
-                                        flet.TextSpan('Portfolio value  ', flet.TextStyle(size=14, color=flet.Colors.GREY_700)),
-                                        flet.TextSpan(fmt_usd(_banner_total), flet.TextStyle(size=22, weight=flet.FontWeight.BOLD)),
-                                    ],
-                                ),
-                            ],
-                            alignment=flet.MainAxisAlignment.CENTER,
-                        ),
-                        padding=flet.padding.symmetric(vertical=6, horizontal=10),
-                        margin=flet.margin.only(bottom=6),
-                        bgcolor=flet.Colors.with_opacity(0.08, flet.Colors.GREEN),
-                        border_radius=flet.border_radius.all(10),
-                    )
-                )
-                if _note:
-                    _balance_controls.append(flet.Text(_note.strip(), size=12, color=flet.Colors.GREY_500))
-            # Spam-filter summary banner (when anything was flagged). Spam
-            # tokens are hidden behind per-network toggles; suspicious tokens
-            # are shown with an inline badge. This banner makes the filtering
-            # visible even before the user scrolls to a token list.
-            if spam_info.get('flagged'):
-                _spam_txt = []
-                if spam_info.get('spam'):
-                    _spam_txt.append(f"{spam_info['spam']} spam hidden")
-                if spam_info.get('suspicious'):
-                    _spam_txt.append(f"{spam_info['suspicious']} suspicious")
-                _balance_controls.append(
-                    flet.Container(
-                        content=flet.Row(
-                            [
-                                flet.Icon(flet.Icons.SHIELD_OUTLINED, color=flet.Colors.RED_700, size=18),
-                                flet.Text(
-                                    f"Spam filter: {' / '.join(_spam_txt)}",
-                                    size=12, color=flet.Colors.RED_700, selectable=True,
-                                ),
-                            ],
-                        ),
-                        padding=flet.padding.symmetric(vertical=4, horizontal=10),
-                        margin=flet.margin.only(bottom=6),
-                        bgcolor=flet.Colors.with_opacity(0.06, flet.Colors.RED),
-                        border_radius=flet.border_radius.all(10),
-                    )
-                )
-            _balance_controls.extend(tmp_balance_result)
-            el_token_balance_data.controls.extend(_balance_controls)
-            e.control.disabled = False  # разблокируем кнопку
-            print(f'time: {datetime.now() - start} sec')
-            page.show_dialog(
-                flet.AlertDialog(
-                    title=flet.Text(f"Balance for {wallet['address_base58']} received successfully!"),
-                )
-            )
-        except Exception as er:
-            print(f'Error get_balance_button_click: {er}')
-            el_token_balance_data.controls.clear()
-            el_token_balance_data.controls.append(
-                flet.Text(f'Error: {er}', color=flet.Colors.RED, size=14)
-            )
-            try:
-                e.control.disabled = False
-            except Exception:
-                pass
-            page.show_dialog(
-                flet.AlertDialog(
-                    title=flet.Text("Error get_balance_button_click!"),
-                )
-            )
-        finally:
-            try:
-                e.control.disabled = False
-            except Exception:
-                pass
-            page.update()
+    # ===================== Wallet cards + balance + history + address ========
+    # The address-page action handlers (delete_wallet / wallet_info / show_qr),
+    # `go_to_address_page`, the balance + history handlers
+    # (`get_balance_button_click` / `get_history_button_click`) and the wallet
+    # cards list (`get_wallets_cards`) -> moved to ui/components/balance.py
+    # (Phase 7 Group 6e). They are wired into the homepage + the address-page
+    # buttons via named ``async def`` adapter closures defined at the call
+    # sites (Group 5 rule #7; never lambdas for async handlers — flet 0.82.2
+    # only awaits handlers for which ``inspect.iscoroutinefunction`` is True,
+    # so a ``lambda e: coro_call`` silently drops the coroutine). The 5
+    # ``on_go_to_*`` adapter closures that Group 6c accidentally deleted
+    # alongside ``lock_app`` are now defined inside ``get_balance_button_click``
+    # in the balance module — the regression is fixed by the move itself.
 
     el_token_page = flet.Column()
     el_spl_token_page = flet.Column()
@@ -1268,7 +328,7 @@ async def main(page: flet.Page):
     async def route_change(route):
         ctx.reset_activity()
         page.views.clear()
-        homepage.controls[-1] = await get_wallets_cards()
+        homepage.controls[-1] = await get_wallets_cards(ctx)
         page.views.append(homepage)
         if page.route == "create-wallet-page":
             page.views.append(create_wallet_page)
@@ -1394,7 +454,7 @@ async def main(page: flet.Page):
             flet.Text('Solana', size=30, font_family="Georgia", weight=flet.FontWeight.BOLD),
             button_group_1,
             flet.Text('Wallets:', size=30, font_family="Georgia", weight=flet.FontWeight.BOLD),
-            await get_wallets_cards(),
+            await get_wallets_cards(ctx),
         ],
     )
 
@@ -1433,22 +493,7 @@ async def main(page: flet.Page):
 
     wc_page = build_wc_page(ctx)
 
-    address_page = flet.View(
-        route="address-page",
-        appbar=flet.AppBar(
-            title=flet.Text("Address Page"),
-            color="white",
-            bgcolor="cyan",
-            leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
-        ),
-        navigation_bar=navbar,
-        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
-        scroll=flet.ScrollMode.AUTO,
-        controls=[
-            flet.Text('Information:', size=30, font_family="Georgia"),
-            el_address_page,
-        ]
-    )
+    address_page = build_address_page(ctx)
 
     token_page = build_token_page(ctx)
     spl_token_page = build_spl_token_page(ctx)
