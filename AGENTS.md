@@ -938,7 +938,9 @@ assert on the built control structure.
       (balance + history + address page + wallet cards) DONE (see "Phase 7 —
       Group 6e: Balance + history + address page + wallet cards" below);
       Group 6f (DevTools Storage inspector) DONE (see "Phase 7 — Group 6f:
-      Dev storage page" below); sub-group 6g (final orchestrator) remains.
+      Dev storage page" below); Group 6g (final orchestrator) DONE (see
+      "Phase 7 — Group 6g: Final orchestrator" below). **Phase 7 is
+      COMPLETE.**
 
 #### Phase 7 — Group 6a: Wallet create / recover / add pages
 UI-only extraction (committed `d9941c7` + review fix `f684894`). Lifted the
@@ -2007,6 +2009,111 @@ untouched — the page only reads/writes `shared_preferences`.
   → success dialog "wc.project_id успешно удалён!" → list **refreshes from
   7 to 6 entries** immediately (latent-bug fix verified end-to-end). 0
   console errors across all interactions.
+
+#### Phase 7 — Group 6g: Final orchestrator
+The **final** Phase-7 group (the refactor is COMPLETE). UI-only extraction.
+Lifted every remaining piece of bootstrap + routing plumbing out of `main()`
+into `src/ui/app.py` (373 lines). `main.py` shrank 540→**39 lines** (a thin
+`async def main(page): await build_app(page)` + `flet.run(main)`). The
+`solana/` business layer is untouched — `app.py` wires together the
+already-extracted `ui/components/*` modules.
+
+- **NEW** `src/ui/app.py` (373 lines) — `build_app(page)` is the sole entry
+  point invoked by `main.py`. It owns exactly the bootstrap + routing
+  plumbing: page configuration (title / alignment / theme / padding /
+  `csv_file_picker` appended to `page.services`); the in-memory `session`
+  dict + the `AppContext`; the 10 shared `flet.Column`s registered in
+  `ctx.controls` (the `el_*` holders every view builder binds + every
+  `*_enter` hook repopulates); the bottom `NavigationBar` + `selected_navbar`
+  handler + `view_pop` back-nav handler; `nav_more` (homepage AppBar action);
+  the homepage View (logo + New/Recover/Add buttons + wallet cards list);
+  the per-route View builders (one call per `build_*_page(ctx)`); the
+  `route_change` dispatcher (byte-identical branches to before); and the
+  bootstrap sequence (`page.on_route_change` / `page.on_view_pop` wiring →
+  initial `route_change(None)` → `auto_lock_watcher` task →
+  `refresh_lock_state`). Everything is local to `build_app` — **no
+  module-level mutable state** (web-mode's per-client isolation preserved).
+- **NEW** `build_addressbook_page(ctx)` (`src/ui/components/addressbook.py`)
+  — the last inline View in `main.py` moved to its owning module. Mirrors
+  the `build_*_page` pattern: route `addressbook-page`, AppBar
+  bgcolor `#0d9488`, back button + navbar wired from `ctx.controls`, binds
+  the shared `el_address_book` Column.
+- **NEW** `build_nft_page(ctx)` (`src/ui/components/nft.py`) — same pattern;
+  route `nft-page`, AppBar bgcolor `#7c3aed`, binds `el_nft_page`.
+- **NEW** `build_staking_page(ctx)` (`src/ui/components/staking.py`) — same
+  pattern; route `stake-page`, AppBar bgcolor `#0d9488`, binds `el_lst_page`.
+- **`main.py`** (540→39): a header comment documenting the Phase-7 migration
+  + the one-line `build_app(page)` delegation + `flet.run(main)`. Every
+  import, closure, View definition and routing branch moved to `app.py`.
+- **Migration-contract rule #13** (Group 6g — final): **app bootstrap +
+  routing → `ui.app` module.** Any future extracted module that needs the
+  navbar, the back-nav handler, the route dispatcher, or the homepage imports
+  nothing extra — they all reach these through `ctx.controls["navbar"]` /
+  `["view_pop"]` registered by `build_app`. **New routes** are added by
+  (a) a `build_*_page(ctx)` in the module that owns the screen and (b) one
+  `elif page.route == ...` branch in `build_app`'s `route_change`. **The
+  homepage stays in `ui.app`** (it's the root view `route="/"`, owns no
+  business logic, and is read by `route_change` on every navigation; the
+  wallet cards themselves are built by `ui.components.balance.
+  get_wallets_cards`).
+- **INVARIANTS preserved**: `homepage.controls[-1]` still the wallets list
+  (the per-navigation `homepage.controls[-1] = await get_wallets_cards(ctx)`
+  refresh keeps working); all Views built once at bootstrap at the same code
+  location in the same order; `route_change`'s branches byte-identical to
+  before; the shared Columns + `view_pop` + `navbar` are the same live
+  objects `ctx.controls` exposes (so the extracted modules' reads/writes are
+  unaffected); PIN never persisted; auto-lock + plaintext-wallet migration
+  live in `ui.security_gate`; per-session state isolation preserved (no
+  module-level mutable state — everything is local to `build_app`);
+  `solana/` untouched.
+- **Key symbols** (`src/ui/app.py`): `build_app(page)`; locals `nav_more` /
+  `selected_navbar` / `view_pop` / `route_change` / `nav_recover` /
+  `nav_add` / `nav_create`; the 10 `ctx.controls["el_*"]` Columns +
+  `["csv_file_picker"]` / `["view_pop"]` / `["navbar"]`; the bootstrap tail
+  (`page.on_route_change` / `on_view_pop` / `route_change(None)` /
+  `auto_lock_watcher` task / `refresh_lock_state`).
+- **VERIFIED**: `py_compile` on all 5 files (`main.py` + `app.py` +
+  `addressbook.py` + `nft.py` + `staking.py`); `git diff --check` clean;
+  no import cycles (`from ui.app import build_app` resolves cleanly). **NEW**
+  `tests/test_app_ui.py` (**113 checks**): the three new `build_*_page`
+  builders (route / AppBar bgcolor + title / back button + navbar wiring /
+  binds the matching `el_*` column / two controls); builder ctx-control
+  contract (raises `KeyError` without the registered column, builds cleanly
+  once registered); `build_app` bootstrap (page config / default LIGHT theme
+  + writes pref when missing / `csv_file_picker` appended to `page.services`
+  / `on_route_change` + `on_view_pop` wired / initial render / PIN setup
+  dialog shown); `build_app` shared-controls registry (all 10 `el_*` Columns
+  registered as fresh distinct objects / `csv_file_picker` / `view_pop` /
+  `navbar` / PIN constants on ctx / session initialized locked +
+  `last_activity`); `build_app` theme=DARK from prefs; homepage invariant
+  (`controls[-1]` is the wallets ListView; `Solana` + `Wallets:` labels; 3
+  OutlinedButtons); `route_change` dispatcher (every route appends the
+  matching view; `*_enter`-hook routes still work; unknown route → homepage
+  only); `view_pop` (pops + pushes new top route); navbar wiring (5
+  destinations Home/New/Recover/Add/More + `on_change`); homepage AppBar
+  More action (IconButton icon=APPS + tooltip=More + `on_click`). Existing
+  offline suites green (17 suites: `test_address_check` 35, `test_sns` 11,
+  `test_history_csv`, `test_spam_filter` 31, `test_priority_fee`,
+  `test_burn_close`, `test_liquid_staking`, `test_wc2_integration`,
+  `test_wallet_create_ui` 39, `test_transfer_ui` 49, `test_swap_ui`,
+  `test_security_gate_ui` 62, `test_settings_ui` 26, `test_more_ui` 50,
+  `test_balance_ui` 77, `test_dev_storage_ui` 50, `test_app_ui` 113).
+  End-to-end via Playwright (web mode, PIN `1234`, app pre-set to Developer
+  mode from a prior session): app **boots clean, 0 console errors / 0
+  warnings**; unlock → homepage renders W1 watch-only card + 3 wallet-entry
+  buttons + 5-tab navbar; **More** AppBar action → `more-page` renders all 3
+  hub sections (WEB3 & DeFi / Tools / Developer — Developer-mode gating
+  intact, proving `more_enter(ctx)` ran via the extracted route dispatcher);
+  **NFT Gallery** hub item → `nft-page` renders (proving `build_nft_page(ctx)`
+  + `nft_enter(ctx, ...)` both run via `route_change`); **back button** →
+  pops to homepage (proving `view_pop` closure works); **Settings** hub item
+  → `settings-page` renders with theme switch + About + Developer-mode
+  experience description. Background-process log confirms every `on_click` /
+  `on_change` handler is a `build_app.<locals>` closure (`nav_more` /
+  `selected_navbar` / `nav_create` / `nav_recover` / `nav_add`) — the
+  closures correctly capture `page` from `build_app`'s scope. **Phase 7
+  refactor COMPLETE**: `main.py` is now a 39-line entry point; every screen
+  + handler lives in `src/ui/` behind the `AppContext` migration contract.
 
 ## Security reminders
 

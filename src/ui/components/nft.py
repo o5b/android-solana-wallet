@@ -283,3 +283,33 @@ async def nft_enter(ctx: AppContext, open_spl_page) -> None:
         grid_holder,
     ])
     page.update()
+
+
+def build_nft_page(ctx: AppContext) -> flet.View:
+    """Build the NFT Gallery page (binds the shared ``el_nft_page`` column;
+    ``nft_enter(ctx, open_spl_page)`` repopulates it on each visit).
+
+    Extracted from ``main.py`` during Phase 7 Group 6g — mirrors the
+    ``build_*_page`` pattern used by the other extracted modules: the View is
+    built once at bootstrap, binds the shared Column registered in
+    ``ctx.controls["el_nft_page"]``, and wires the shared view chrome (AppBar
+    back button + navbar) from ``ctx.controls``.
+    """
+    view_pop = ctx.controls["view_pop"]
+    navbar = ctx.controls["navbar"]
+    return flet.View(
+        route="nft-page",
+        appbar=flet.AppBar(
+            title=flet.Text("NFT Gallery"),
+            color="white",
+            bgcolor="#7c3aed",
+            leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
+        ),
+        navigation_bar=navbar,
+        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
+        scroll=flet.ScrollMode.AUTO,
+        controls=[
+            flet.Text('NFT Gallery', size=30, font_family="Georgia"),
+            ctx.controls["el_nft_page"],
+        ],
+    )

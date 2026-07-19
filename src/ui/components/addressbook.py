@@ -416,3 +416,33 @@ async def addressbook_enter(ctx: AppContext) -> None:
 
     el_address_book.controls.append(add_form)
     page.update()
+
+
+def build_addressbook_page(ctx: AppContext) -> flet.View:
+    """Build the Address Book page (binds the shared ``el_address_book`` column;
+    ``addressbook_enter(ctx)`` repopulates it on each visit).
+
+    Extracted from ``main.py`` during Phase 7 Group 6g — mirrors the
+    ``build_*_page`` pattern used by the other extracted modules: the View is
+    built once at bootstrap, binds the shared Column registered in
+    ``ctx.controls["el_address_book"]``, and wires the shared view chrome
+    (AppBar back button + navbar) from ``ctx.controls``.
+    """
+    view_pop = ctx.controls["view_pop"]
+    navbar = ctx.controls["navbar"]
+    return flet.View(
+        route="addressbook-page",
+        appbar=flet.AppBar(
+            title=flet.Text("Address Book"),
+            color="white",
+            bgcolor="#0d9488",
+            leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
+        ),
+        navigation_bar=navbar,
+        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
+        scroll=flet.ScrollMode.AUTO,
+        controls=[
+            flet.Text('Address Book', size=30, font_family="Georgia"),
+            ctx.controls["el_address_book"],
+        ],
+    )
