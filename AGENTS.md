@@ -931,9 +931,10 @@ assert on the built control structure.
     burn/close)~~ — **DONE** (see "Phase 7 — Group 5" below, committed `cea4188`).
     6. Wallet cards + views (`homepage`/`more_page`/`settings_page`/`route_change`) —
     **IN PROGRESS**. Group 6a (wallet create/recover/add pages) DONE; Group 6b
-    (swap page) DONE (see "Phase 7 — Group 6b: Swap page" below); sub-groups
-    6c+ (PIN gate / settings+More hub / balance+history+cards / final
-    orchestrator) remain.
+    (swap page) DONE (see "Phase 7 — Group 6b: Swap page" below); Group 6c
+    (PIN gate + lock dialogs) DONE (see "Phase 7 — Group 6c: PIN gate + lock
+    dialogs" below); sub-groups 6d+ (settings+More hub / balance+history+cards
+    / final orchestrator) remain.
 
 #### Phase 7 — Group 6a: Wallet create / recover / add pages
 UI-only extraction (committed `d9941c7` + review fix `f684894`). Lifted the
@@ -1081,8 +1082,137 @@ untouched (pure reuse of `solana.swap.get_quote` / `solana.swap.swap`).
   ElevatedButtons / selectable quote Text), signatures. End-to-end via
   Playwright (PIN `1234`, W1 watch-only): **boots clean, 0 console errors**;
   balance screen builds the "Swap" button with `on_click=on_go_to_swap_page`
-  (adapter wired + reachable); button correctly **disabled** for the
-  devnet-only W1 watch-only wallet with 0 mainnet SOL.
+   (adapter wired + reachable); button correctly **disabled** for the
+   devnet-only W1 watch-only wallet with 0 mainnet SOL.
+
+
+#### Phase 7 — Group 6c: PIN gate + lock dialogs
+UI-only extraction. Lifted the entire security block (PIN-gate setup/unlock
+modals + auto-lock watcher + plaintext-wallet migration + destructive wipe)
+out of `main()` into `src/ui/security_gate.py` (277 lines). `main.py`
+2037→**1816** (−221 lines). The `solana/` business layer is untouched — pure
+reuse of `solana.security` crypto primitives.
+
+- **NEW** `src/ui/security_gate.py` (277 lines): module-level functions, all
+  `ctx`-first, mutating only `ctx.session` / `ctx.page.shared_preferences`
+  (**no module-level mutable state** — web-mode's one `main()` per client
+  stays correctly isolated, matching the Group-1 rule):
+  - **PIN storage**: `load_pin(ctx)` → `(salt_bytes, verifier_str)` or
+    `(None, None)` (incl. on corruption); `save_pin(ctx, salt, verifier)`.
+  - **`migrate_plaintext_wallets(ctx, key)`** — Fernet-encrypts every legacy
+    plaintext `wallet.*` record once. Idempotent (skips records already
+    carrying `WALLET_ENCRYPTED_FIELD`) + graceful (ignores non-string /
+    non-JSON / non-dict junk + watch-only/empty records).
+  - **`clear_client_storage(ctx)`** — wipes every `shared_preferences` key
+    (moved here from main.py; shared by the "Forgot PIN?" reset flow AND
+    the More hub's "Clear all storage" button).
+  - **Dialog primitives**: `close_lock_dialog(ctx)` (clears the in-memory
+    handle + closes the dialog); `lock_app(ctx)` (drops the Fernet key +
+    re-invokes `refresh_lock_state`).
+  - **`show_setup_dialog(ctx)`** — first-run modal (Create/Confirm PIN
+    TextFields + "Set PIN" button). The embedded `confirm` handler validates
+    length + match, derives salt/key/verifier, persists, migrates plaintext
+    wallets once, sets `session["unlocked"]=True` + `session["key"]=key`.
+  - **`show_unlock_dialog(ctx)`** — subsequent-run modal (Enter PIN + Unlock
+    + Forgot PIN?). `do_unlock` verifies via `verify_pin`, derives the key,
+    defensively re-runs `migrate_plaintext_wallets`, closes. `forgot_pin`
+    opens a destructive "Reset & Wipe" confirm dialog whose `do_wipe` calls
+    `clear_client_storage(ctx)` + clears session + re-invokes
+    `refresh_lock_state` (→ setup dialog, PIN is gone); `cancel` re-invokes
+    `show_unlock_dialog(ctx)` (recursive — fine as a module function).
+  - **`refresh_lock_state(ctx)`** — dispatcher: setup dialog when no PIN,
+    unlock dialog otherwise.
+  - **`auto_lock_watcher(ctx)`** — background loop: every 10 s, if no lock
+    dialog is open AND `ctx.is_unlocked()` AND
+    `time.time() - session["last_activity"] > ctx.auto_lock_seconds`, calls
+    `lock_app(ctx)`.
+  - Uses `ctx.page.update()` directly (NOT `safe_update`) — the PIN gate
+    must reliably render; a silent swallow would hide a bootstrap defect.
+- **`src/ui/context.py`** (+14 lines): added `decrypt_for_display(wallet)`
+  method (locked → passthrough; unlocked →
+  `decrypt_wallet_secrets(wallet, session["key"])`). Same pattern as Group
+  3's `get_wallet_private_key` / `has_wallet_private_key`. Added
+  `decrypt_wallet_secrets` to the `solana.security` import.
+- **`main.py`** (2037→1816):
+  - **Imports**: added `from ui.security_gate import auto_lock_watcher,
+    clear_client_storage, refresh_lock_state`. Trimmed the
+    `from solana.security import (...)` block from 13 symbols down to
+    **just `WATCH_ONLY_FIELD`**. `import time` stays (session dict
+    initializer `time.time()`).
+  - **Deleted closures** (~221 lines): `reset_activity`, `load_pin`,
+    `save_pin`, `migrate_plaintext_wallets`, `is_unlocked`,
+    `get_wallet_private_key`, `has_wallet_private_key`,
+    `decrypt_for_display`, `lock_app`, `close_lock_dialog`,
+    `show_setup_dialog`, `show_unlock_dialog`, `refresh_lock_state`,
+    `auto_lock_watcher`, `clear_client_storage` — all replaced by the
+    module + ctx methods. The `is_unlocked` / `get_wallet_private_key` /
+    `has_wallet_private_key` legacy closures were deleted because their
+    last main.py callers migrated to `ctx.*` in Group 6b — no remaining
+    callers.
+  - **Updated call sites**: `decrypt_for_display(wallet)` →
+    `ctx.decrypt_for_display(wallet)` (2 sites: Wallet Info dialog);
+    `reset_activity()` → `ctx.reset_activity()` (2 sites: `route_change`
+    + `view_pop`); `clear_client_storage()` → `clear_client_storage(ctx)`
+    (1 site: `_do_clear_storage`); bootstrap
+    `asyncio.create_task(auto_lock_watcher())` + `await
+    refresh_lock_state()` → both gain `(ctx)`.
+- **Migration-contract rule #9** (Group 6c): **PIN gate → `ui.security_gate`
+  module.** Any future extracted module that needs to gate on unlock state,
+  force a re-lock, wipe storage, or run the plaintext-wallet migration
+  imports from `ui.security_gate` and passes `ctx` — never reaches into
+  `solana.security` primitives directly (those are the low-level crypto
+  layer; the gate is the UI layer above them). **Record decryption for
+  display → `ctx.decrypt_for_display`.** Joins `get_wallet_private_key` /
+  `has_wallet_private_key` / `encrypt_for_storage` as the wallet-secret
+  accessors on `AppContext`.
+- **INVARIANTS preserved**: `homepage.controls[-1]` still the wallets list;
+  `route_change` / `view_pop` activity-reset calls at the same code
+  location (just via `ctx.reset_activity()`); bootstrap sequence unchanged
+  (`auto_lock_watcher` task started, then `refresh_lock_state` shows the
+  PIN gate) — only the call sites gained `(ctx)`; `solana/` untouched;
+  **PIN never persisted** (only scrypt salt + encrypted verifier), the
+  Fernet `session["key"]` lives only in memory; `migrate_plaintext_wallets`
+  is idempotent + runs both once after first PIN setup and defensively on
+  every unlock; per-session state isolation preserved (no module-level
+  mutable state).
+- **Key symbols** (`src/main.py` — re-grep, line numbers drift): import
+  `from ui.security_gate import auto_lock_watcher, clear_client_storage,
+  refresh_lock_state` (~L79); trimmed `from solana.security import
+  WATCH_ONLY_FIELD` (~L25); migration marker block (~L128);
+  `ctx.decrypt_for_display` call sites (~L300, ~L308);
+  `clear_client_storage(ctx)` (~L1315); `ctx.reset_activity()` (~L1418,
+  ~L1469); bootstrap `asyncio.create_task(auto_lock_watcher(ctx))` + `await
+  refresh_lock_state(ctx)` (~L1812-1813).
+- **VERIFIED**: `py_compile` on all 3 files; `git diff --check` clean.
+  **NEW** `tests/test_security_gate_ui.py` (**62 checks**):
+  `ctx.decrypt_for_display`; `load_pin`/`save_pin` (round-trip + `(None,None)`
+  on missing + corrupt salt); `migrate_plaintext_wallets` (encrypts + Fernet
+  round-trip, skips already-encrypted byte-identical, handles watch-only +
+  non-string + non-JSON + non-dict junk); `clear_client_storage`;
+  `close_lock_dialog`; `show_setup_dialog` (structure + embedded `confirm`
+  driven directly: PIN match → persisted + unlocked; mismatch → error);
+  `show_unlock_dialog` (structure + correct PIN → unlocked; wrong → error);
+  `refresh_lock_state` (no-PIN → setup; PIN-set → unlock); `lock_app`;
+  `auto_lock_watcher` (locks after threshold via fake-sleep monkeypatch;
+  skips when a dialog is already open). Existing offline suites green
+  (`test_wallet_create_ui` 39, `test_transfer_ui` 49, `test_swap_ui`,
+  `test_address_check` 35, `test_sns` 11, `test_history_csv`,
+  `test_spam_filter` 31, `test_priority_fee`, `test_burn_close`,
+  `test_liquid_staking`, `test_wc2_integration`). End-to-end via Playwright
+  (web mode, PIN `1234` from prior session): **boots clean, 0 console
+  errors**; `refresh_lock_state(ctx)` at bootstrap shows the unlock dialog;
+  `1234` → Unlock → dialog closes → session unlocked → homepage renders
+  with AppBar + navbar. The `auto_lock_watcher(ctx)` background task starts
+  (covered headlessly for the lock path — not waited out in the browser).
+- **flet headless-testing gotcha** (added to playbook §14): in flet 0.82.2
+  `ElevatedButton("text")` / `TextButton("text")` store the label in
+  `.content` as a **plain `str`** — NOT in `.text` (unset), NOT in a
+  `flet.Text` control (only when you explicitly pass
+  `content=flet.Text(...)`). Headless button-lookup helpers must check
+  `isinstance(c.content, str)` first. The `on_click` callback IS preserved
+  on the button object (readable outside a live session for
+  `ElevatedButton`/`TextButton`) — the basis for driving the embedded
+  `confirm`/`do_unlock` handlers directly in the new test.
 
 
 #### Phase 7 — Group 5: Transfer screens (SOL/SPL, burn/close)
