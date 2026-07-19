@@ -23,18 +23,11 @@ from solana.spam_filter import (
 from solana.transaction_history import get_transaction_history
 from solana.history_csv import transaction_history_to_csv
 from solana.security import WATCH_ONLY_FIELD
-from ui.experience import (
-    SIMPLE,
-    DEVELOPER,
-    MODES,
-    label as experience_label,
-    description as experience_description,
-    feature,
-    get_experience,
-    set_experience,
-    has_seen_dev_warning,
-    mark_dev_warning_seen,
-)
+# Experience registry: feature() + get_experience() stay here (they're used by
+# the balance + history handlers in Group 6e). The Settings selector + the
+# dev-warning dialog + set/has_seen/mark helpers -> moved to
+# ui/components/settings.py (Phase 7 Group 6d).
+from ui.experience import feature, get_experience
 from ui.context import AppContext
 from ui.formatting import short_addr as _short_addr
 from ui.components.priority_fee import (
@@ -76,9 +69,12 @@ from ui.components.transfer import (
 from ui.components.walletconnect import build_wc_page, wc_enter
 from ui.components.wallet_create import build_wallet_pages
 from ui.components.swap import build_swap_page, go_to_swap_page_click
+from ui.components.more import build_more_page, more_enter
+from ui.components.settings import build_settings_page, settings_enter
+# clear_client_storage -> moved to ui/components/more.py (Phase 7 Group 6d):
+# it's only called from the More hub's "Clear all storage" destructive flow.
 from ui.security_gate import (
     auto_lock_watcher,
-    clear_client_storage,
     refresh_lock_state,
 )
 
@@ -1151,99 +1147,16 @@ async def main(page: flet.Page):
     # once here at bootstrap; the form fields persist across navigations
     # (legacy "global objects" behaviour). `encrypt_for_storage` lives on ctx.
 
-    async def theme_changed(e):
-        page.theme_mode = flet.ThemeMode.DARK if page.theme_mode == flet.ThemeMode.LIGHT else flet.ThemeMode.LIGHT
-        theme_control.label = "Light theme" if page.theme_mode == flet.ThemeMode.LIGHT else "Dark theme"
-        if page.theme_mode == flet.ThemeMode.LIGHT:
-            await page.shared_preferences.set("theme_mode", "LIGHT")
-        else:
-            await page.shared_preferences.set("theme_mode", "DARK")
-        page.update()
-
-    theme_control = flet.Switch(
-        label="Light theme" if page.theme_mode == flet.ThemeMode.LIGHT else "Dark theme",
-        on_change=theme_changed,
-    )
-
-    # ---- Experience level (Simple / Pro / Developer) ----
-    experience_dd = flet.Dropdown(
-        label="Experience level",
-        options=[flet.dropdown.Option(key=m, text=experience_label(m)) for m in MODES],
-        value=SIMPLE,
-        dense=True,
-        on_select=lambda e: asyncio.create_task(experience_changed(e)),
-    )
-    experience_desc = flet.Text(
-        experience_description(SIMPLE), size=11, color=flet.Colors.GREY_700,
-    )
-
-    async def settings_enter() -> None:
-        """Read the persisted experience level into the Settings selector."""
-        mode = await get_experience(page)
-        experience_dd.value = mode
-        experience_desc.value = experience_description(mode)
-
-    async def _apply_experience(mode: str) -> None:
-        mode = await set_experience(page, mode)
-        experience_dd.value = mode
-        experience_desc.value = experience_description(mode)
-        page.update()
-
-    async def experience_changed(e):
-        new_mode = experience_dd.value
-        prev = await get_experience(page)
-        # Gate the first switch INTO Developer with a destructive-tool warning.
-        if (
-            new_mode == DEVELOPER
-            and prev != DEVELOPER
-            and not await has_seen_dev_warning(page)
-        ):
-            _show_dev_warning(new_mode, prev)
-            return
-        await _apply_experience(new_mode)
-
-    def _show_dev_warning(new_mode, prev_mode):
-        dlg = flet.AlertDialog(
-            modal=True,
-            title=flet.Text("Enable Developer mode?"),
-            content=flet.Column(
-                [
-                    flet.Text(
-                        "Developer mode unlocks raw, potentially destructive tools: "
-                        "the storage inspector, raw-key export, simulation details and more.",
-                        size=12,
-                    ),
-                    flet.Text(
-                        "These can expose private keys or wipe local data if misused. "
-                        "Only enable this if you know what you are doing.",
-                        size=12,
-                        color=flet.Colors.GREY_700,
-                    ),
-                ],
-                spacing=6,
-                tight=True,
-            ),
-            actions=[
-                flet.TextButton("Cancel", on_click=lambda ev: _cancel_dev_warning(dlg, prev_mode)),
-                flet.TextButton(
-                    "Enable Developer",
-                    style=flet.ButtonStyle(color=flet.Colors.RED),
-                    on_click=lambda ev: asyncio.create_task(_confirm_dev_warning(dlg, new_mode)),
-                ),
-            ],
-        )
-        page.show_dialog(dlg)
-
-    def _cancel_dev_warning(dlg, prev_mode):
-        ctx.close_dialog(dlg)
-        # Revert the dropdown to the previously persisted mode.
-        experience_dd.value = prev_mode
-        page.update()
-
-    async def _confirm_dev_warning(dlg, mode):
-        ctx.close_dialog(dlg)
-        await mark_dev_warning_seen(page)
-        await _apply_experience(mode)
+    # ===================== Theme + Experience level ============================
+    # theme_changed / theme_control / experience_dd / experience_desc /
+    # settings_enter / _apply_experience / experience_changed /
+    # _show_dev_warning / _cancel_dev_warning / _confirm_dev_warning
+    # -> moved to ui/components/settings.py (Phase 7 Group 6d). The Settings
+    # page View + the three long-lived controls are built by
+    # build_settings_page(ctx) at bootstrap; settings_enter(ctx) re-reads the
+    # persisted mode on each visit. theme_mode is still initialized above (in
+    # main) so the bootstrap UI uses the persisted theme before the Settings
+    # page is built.
 
     async def dev_tools_storage_list():
         lv = flet.ListView(expand=1, spacing=10, padding=20, auto_scroll=True)
@@ -1286,35 +1199,17 @@ async def main(page: flet.Page):
 
     # clear_client_storage -> moved to ui/security_gate.py (Phase 7 Group 6c).
 
-    # ---- Navigation handlers used by the "More" hub ----
-    async def nav_addressbook(e): await page.push_route("addressbook-page")
-    async def nav_dev_storage(e): await page.push_route("dev-storage-page")
-
-    async def clear_storage_click(e):
-        """Wipe ALL local storage (wallets, PIN, contacts, WC pairing). Destructive."""
-        dlg = flet.AlertDialog(
-            title=flet.Text("Clear ALL local storage?"),
-            content=flet.Text(
-                "This permanently deletes every wallet, the PIN, contacts and "
-                "WalletConnect pairing. Encrypted secrets cannot be recovered.",
-                size=12,
-            ),
-            actions=[
-                flet.TextButton("Cancel", on_click=lambda ev: ctx.close_dialog(dlg)),
-                flet.TextButton(
-                    "Clear everything",
-                    style=flet.ButtonStyle(color=flet.Colors.RED),
-                    on_click=lambda ev: asyncio.create_task(_do_clear_storage(dlg)),
-                ),
-            ],
-        )
-        page.show_dialog(dlg)
-
-    async def _do_clear_storage(dlg):
-        ctx.close_dialog(dlg)
-        await clear_client_storage(ctx)
-        page.show_dialog(flet.AlertDialog(title=flet.Text("All local storage cleared.")))
-        await page.push_route("/")
+    # ===================== More hub navigation handlers ========================
+    # nav_addressbook / nav_dev_storage / nav_wc / nav_nft / nav_stake /
+    # nav_settings / nav_sim / nav_rpc / nav_rawkey / clear_storage_click /
+    # _do_clear_storage / _hub_item / more_enter -> moved to
+    # ui/components/more.py (Phase 7 Group 6d). They are defined as tiny
+    # `async def` closures inside more_enter (so they capture `page` from ctx)
+    # and the More page View is built by build_more_page(ctx).
+    #
+    # nav_more stays here: it's the homepage AppBar "More" action icon
+    # (homepage stays in main.py — it migrates with the orchestrator group 6g).
+    async def nav_more(e): await page.push_route("more-page")
 
     async def selected_navbar(e):
         idx = e.control.selected_index
@@ -1368,51 +1263,7 @@ async def main(page: flet.Page):
     # (_wc_*/on_wc_*) -> moved to ui/components/walletconnect.py. The four
     # long-lived WC controls (URI input / projectId input / status text /
     # sessions list) are registered in ctx.controls by build_wc_page(ctx); the
-    # per-session live client lives in ctx.session["_wc_state"]. nav_wc stays
-    # here (it is a "More" hub navigation handler used by more_enter).
-
-    # ---- "More" hub: navigation handlers + item builder ----
-    async def nav_wc(e): await page.push_route("wc-page")
-    async def nav_nft(e): await page.push_route("nft-page")
-    async def nav_stake(e): await page.push_route("stake-page")
-    async def nav_more(e): await page.push_route("more-page")
-    async def nav_settings(e): await page.push_route("settings-page")
-    async def nav_sim(e): await page.push_route("sim-page")
-    async def nav_rpc(e): await page.push_route("rpc-page")
-    async def nav_rawkey(e): await page.push_route("raw-key-page")
-
-    def _hub_item(icon, title: str, subtitle: str, on_click, badge: str = "") -> flet.Card:
-        """One tappable entry in the 'More' hub: icon + title + description + chevron."""
-        trailing = []
-        if badge:
-            trailing.append(flet.Container(
-                content=flet.Text(badge, size=10, color=flet.Colors.WHITE, weight=flet.FontWeight.BOLD),
-                bgcolor=flet.Colors.GREY_500, border_radius=6, padding=4,
-            ))
-        return flet.Card(
-            content=flet.Container(
-                ink=True,
-                on_click=on_click,
-                padding=12,
-                width=440,
-                content=flet.Row(
-                    [
-                        flet.Icon(icon, size=28, color=flet.Colors.BLUE_700),
-                        flet.Column(
-                            [
-                                flet.Text(title, size=15, weight=flet.FontWeight.BOLD),
-                                flet.Text(subtitle, size=11, color=flet.Colors.GREY_700),
-                            ],
-                            expand=True,
-                            spacing=1,
-                        ),
-                        *trailing,
-                        flet.Icon(flet.Icons.CHEVRON_RIGHT, color=flet.Colors.GREY_400),
-                    ],
-                    alignment=flet.MainAxisAlignment.START,
-                ),
-            ),
-        )
+    # per-session live client lives in ctx.session["_wc_state"].
 
     async def route_change(route):
         ctx.reset_activity()
@@ -1449,10 +1300,10 @@ async def main(page: flet.Page):
             await lst_enter(ctx)
             page.views.append(stake_page)
         elif page.route == "more-page":
-            await more_enter()
+            await more_enter(ctx)
             page.views.append(more_page)
         elif page.route == "settings-page":
-            await settings_enter()
+            await settings_enter(ctx)
             page.views.append(settings_page)
         elif page.route == "sim-page":
             page.views.append(sim_page)
@@ -1654,153 +1505,16 @@ async def main(page: flet.Page):
         ]
     )
 
-    more_page = flet.View(
-        route="more-page",
-        appbar=flet.AppBar(
-            title=flet.Text("More"),
-            color="white",
-            bgcolor="#1da1f2",
-            leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
-        ),
-        navigation_bar=navbar,
-        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
-        scroll=flet.ScrollMode.AUTO,
-        controls=[],  # populated by more_enter() based on the active experience mode
-    )
-
-    async def more_enter() -> None:
-        """Rebuild the More hub controls for the persisted experience mode.
-
-        Sections whose items are all gated out are omitted entirely (header +
-        divider included), so Simple mode shows only the Tools section.
-        """
-        mode = await get_experience(page)
-        controls: list = []
-
-        # WEB3 & DeFi — Pro+ only; section is skipped entirely in Simple mode.
-        web3_items = []
-        if feature("walletconnect", mode):
-            web3_items.append(_hub_item(flet.Icons.LINK, "Connect dApp",
-                                        "Pair with a dApp via WalletConnect v2 and sign requests.", nav_wc))
-        if feature("nft", mode):
-            web3_items.append(_hub_item(flet.Icons.COLLECTIONS, "NFT Gallery",
-                                        "Browse and send your non-fungible tokens.", nav_nft))
-        if feature("staking", mode):
-            web3_items.append(_hub_item(flet.Icons.SAVINGS, "Liquid Staking",
-                                        "Stake SOL into JitoSOL / mSOL / bSOL / jupSOL.", nav_stake))
-        if web3_items:
-            controls.append(flet.Text("WEB3 & DeFi", size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600))
-            controls.extend(web3_items)
-            controls.append(flet.Divider())
-
-        # Tools — always visible in every mode.
-        controls.append(flet.Text("Tools", size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600))
-        controls.append(_hub_item(flet.Icons.CONTACTS, "Address Book",
-                                  "Saved recipients with address-poisoning protection.", nav_addressbook))
-        controls.append(_hub_item(flet.Icons.SETTINGS, "Settings",
-                                  "Theme, security and app preferences.", nav_settings))
-
-        # Developer — Developer mode only. Each tool is gated by its own feature
-        # key so the section assembles from whatever the matrix exposes.
-        dev_items = []
-        if feature("devtools", mode):
-            dev_items.append(_hub_item(flet.Icons.STORAGE, "Storage inspector",
-                                       "View and edit raw shared_preferences keys.", nav_dev_storage, badge="dev"))
-        if feature("sim_detail", mode):
-            dev_items.append(_hub_item(flet.Icons.BIOTECH, "Simulation inspector",
-                                       "Run the anti-phishing simulation on a pasted transaction.", nav_sim, badge="dev"))
-        if feature("custom_rpc", mode):
-            dev_items.append(_hub_item(flet.Icons.DVR, "Raw RPC inspector",
-                                       "Run read-only JSON-RPC calls against any endpoint.", nav_rpc, badge="dev"))
-        if feature("raw_export", mode):
-            dev_items.append(_hub_item(flet.Icons.VPN_KEY, "Export raw keys",
-                                       "Reveal & copy a wallet's private key / mnemonic. DANGEROUS.",
-                                       nav_rawkey, badge="danger"))
-        if feature("devtools", mode):
-            dev_items.append(_hub_item(flet.Icons.DELETE_SWEEP_OUTLINED, "Clear all storage",
-                                       "Wipe every wallet, PIN and pairing. Irreversible.", clear_storage_click, badge="danger"))
-        if dev_items:
-            controls.append(flet.Divider())
-            controls.append(flet.Text("Developer", size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600))
-            controls.extend(dev_items)
-
-        more_page.controls = [
-            flet.Column(
-                controls,
-                spacing=6,
-                width=460,
-            ),
-        ]
-
-    settings_page = flet.View(
-        route="settings-page",
-        appbar=flet.AppBar(
-            title=flet.Text("Settings"),
-            color="white",
-            bgcolor="#1da1f2",
-            leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
-        ),
-        navigation_bar=navbar,
-        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
-        scroll=flet.ScrollMode.AUTO,
-        controls=[
-            flet.Column(
-                [
-                    flet.Text("Appearance", size=18, weight=flet.FontWeight.BOLD),
-                    flet.Card(
-                        content=flet.Container(
-                            padding=12,
-                            width=440,
-                            content=flet.Row(
-                                [flet.Icon(flet.Icons.PALETTE_OUTLINED), theme_control],
-                                alignment=flet.MainAxisAlignment.SPACE_BETWEEN,
-                            ),
-                        )
-                    ),
-                    flet.Divider(),
-                    flet.Text("About", size=18, weight=flet.FontWeight.BOLD),
-                    flet.Card(
-                        content=flet.Container(
-                            padding=12,
-                            width=440,
-                            content=flet.Column(
-                                [
-                                    flet.Text("Solana Wallet", size=15, weight=flet.FontWeight.BOLD),
-                                    flet.Text("Hand-rolled Solana wallet (Python + Flet).",
-                                              size=11, color=flet.Colors.GREY_700),
-                                    flet.Text("All blockchain logic is implemented from scratch "
-                                              "(no solana-py / solders).",
-                                              size=11, color=flet.Colors.GREY_700),
-                                ],
-                                spacing=2,
-                            ),
-                        )
-                    ),
-                    flet.Container(height=8),
-                    flet.Text("Experience level", size=18, weight=flet.FontWeight.BOLD),
-                    flet.Card(
-                        content=flet.Container(
-                            padding=12,
-                            width=440,
-                            content=flet.Column(
-                                [
-                                    flet.Row(
-                                        [flet.Icon(flet.Icons.TUNE_OUTLINED), experience_dd],
-                                        alignment=flet.MainAxisAlignment.SPACE_BETWEEN,
-                                    ),
-                                    experience_desc,
-                                ],
-                                spacing=6,
-                                tight=True,
-                            ),
-                        )
-                    ),
-                ],
-                spacing=6,
-                width=460,
-            ),
-        ],
-    )
+    # ===================== More hub + Settings pages ===========================
+    # More hub + Settings page Views are built once here at bootstrap by the
+    # extracted modules (Phase 7 Group 6d). `more_enter(ctx)` rebuilds the
+    # hub's controls on each visit (experience-mode filtering); the View itself
+    # is registered in `ctx.controls["more_page"]` so `more_enter` can mutate
+    # it. `build_settings_page(ctx)` registers `theme_control` /
+    # `experience_dd` / `experience_desc` in `ctx.controls`; `settings_enter
+    # (ctx)` re-reads the persisted mode into them on each visit.
+    more_page = build_more_page(ctx)
+    settings_page = build_settings_page(ctx)
 
     page.on_route_change = route_change
     page.on_view_pop = view_pop
