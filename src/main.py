@@ -1,5 +1,4 @@
 import asyncio
-import json
 import time
 
 import flet
@@ -24,9 +23,11 @@ from ui.components.balance import (
     get_wallets_cards,
 )
 from ui.components.devtools import (
-    build_sim_page,
-    build_rpc_page,
+    build_dev_storage_page,
     build_rawkey_page,
+    build_rpc_page,
+    build_sim_page,
+    dev_storage_enter,
     rawkey_enter,
 )
 from ui.components.nft import nft_enter
@@ -157,6 +158,12 @@ async def main(page: flet.Page):
     # rebuild it (Phase 7). The `raw_key_page` view below still binds this same
     # object directly.
     ctx.controls["el_rawkey_page"] = el_rawkey_page
+    el_dev_storage_page = flet.Column()
+    # Register the shared control with ctx so the extracted devtools module can
+    # rebuild it (Phase 7 Group 6f). The `dev_storage_page` view below still
+    # binds this same object directly; ``dev_storage_enter(ctx)`` repopulates it
+    # on each visit (mirrors addressbook_enter / rawkey_enter).
+    ctx.controls["el_dev_storage_page"] = el_dev_storage_page
 
     # ===================== Wallet cards + balance + history + address ========
     # The address-page action handlers (delete_wallet / wallet_info / show_qr),
@@ -218,44 +225,16 @@ async def main(page: flet.Page):
     # main) so the bootstrap UI uses the persisted theme before the Settings
     # page is built.
 
-    async def dev_tools_storage_list():
-        lv = flet.ListView(expand=1, spacing=10, padding=20, auto_scroll=True)
-        keys = await page.shared_preferences.get_keys('')
-        for i, key in enumerate(keys):
-            val = await page.shared_preferences.get(key)
-            if isinstance(val, str):
-                try:
-                    val = json.loads(val)
-                except json.JSONDecodeError:
-                    pass
-            lv.controls.append(
-                flet.Row(
-                    scroll=flet.ScrollMode.AUTO,
-                    controls=[
-                        flet.ElevatedButton(content="Delete", on_click=storage_delete_button_click, data=key),
-                        flet.Text(f"{i+1}. {key}: {val}", max_lines=2),
-                    ]
-                )
-            )
-        return lv
-
-    async def storage_delete_button_click(e):
-        try:
-            await page.shared_preferences.remove(e.control.data)
-        except Exception as er:
-            print(f'Error deleted data from shared_preferences: {er}')
-            page.show_dialog(
-                flet.AlertDialog(
-                    title=flet.Text("Во время удаления произошла ошибка!"),
-                )
-            )
-        else:
-            page.show_dialog(
-                flet.AlertDialog(
-                    title=flet.Text(f"{e.control.data} успешно удалён!"),
-                )
-            )
-        page.update()
+    # ===================== DevTools: Storage inspector =========================
+    # dev_tools_storage_list / storage_delete_button_click -> moved to
+    # ui/components/devtools.py (Phase 7 Group 6f) as ``dev_storage_enter(ctx)``
+    # + ``_dev_storage_delete_click(ctx, key)``. The page View is built once
+    # here at bootstrap via ``build_dev_storage_page(ctx)``; the enter hook
+    # rebuilds the keys/values ListView on each visit (latent-bug fix: the
+    # legacy page built the list once at bootstrap so deletes weren't visible
+    # until app restart — the enter pattern refreshes it after every delete).
+    # ``import json`` was removed from main.py — the only main.py user was the
+    # storage list, and the module already imports it.
 
     # clear_client_storage -> moved to ui/security_gate.py (Phase 7 Group 6c).
 
@@ -337,6 +316,7 @@ async def main(page: flet.Page):
         elif page.route == "add-wallet-address-page":
             page.views.append(add_wallet_address_page)
         elif page.route == "dev-storage-page":
+            await dev_storage_enter(ctx)
             page.views.append(dev_storage_page)
         elif page.route == "address-page":
             el_token_balance_data.controls.clear()
@@ -463,22 +443,7 @@ async def main(page: flet.Page):
     # on its matching route, exactly as before.
     create_wallet_page, recover_wallet_page, add_wallet_address_page = await build_wallet_pages(ctx)
 
-    dev_storage_page = flet.View(
-        route="dev-storage-page",
-        appbar=flet.AppBar(
-            title=flet.Text("DevTools: Storage"),
-            color="white",
-            bgcolor="cyan",
-            leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
-        ),
-        navigation_bar=navbar,
-        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
-        scroll=flet.ScrollMode.AUTO,
-        controls=[
-            flet.Text(value='Редактирование client_storage:', size=20),
-            await dev_tools_storage_list(),
-        ]
-    )
+    dev_storage_page = build_dev_storage_page(ctx)
 
     # =================== Developer: dev tools pages =========================
     # Simulation inspector / Raw RPC inspector / Export raw keys -> moved to

@@ -1,6 +1,6 @@
 """Developer-only tool pages (extracted from ``main.py``).
 
-Owns the three Developer-layer screens assembled in Phase 6 of the tiered-UI
+Owns the four Developer-layer screens assembled in Phase 6 of the tiered-UI
 redesign, each gated by its own experience feature key:
 
 * :func:`build_sim_page` — **Simulation inspector** (``sim_detail``): paste a
@@ -16,12 +16,16 @@ redesign, each gated by its own experience feature key:
   ``private_key_hex`` / ``secret_key_base58`` / mnemonic / ``public_key_hex``.
   Secrets are already PIN-gated at rest; this page just makes the reveal a
   deliberate, clearly-labelled Developer action.
+* :func:`build_dev_storage_page` + :func:`dev_storage_enter` — **Storage
+  inspector** (``devtools``): list every ``shared_preferences`` key/value
+  (JSON-decoded when possible) with a per-row Delete button. Rebuilt on each
+  visit so deletes are reflected immediately (Phase 7 Group 6f).
 
 Every function that needs ``page``/``session`` takes an :class:`AppContext` as
 its first argument (Phase 7 migration contract). The module never reaches back
 into ``main.py``: it depends only on ``solana/`` business logic, ``ui.context``
 and shared controls registered in ``ctx.controls`` (``view_pop``, ``navbar``,
-``el_rawkey_page``). Wallets are read directly from
+``el_rawkey_page``, ``el_dev_storage_page``). Wallets are read directly from
 ``ctx.page.shared_preferences`` under the ``"wallet."`` prefix so there is no
 dependency on ``main.py``'s ``get_storage_data`` closure.
 """
@@ -495,4 +499,98 @@ def build_rawkey_page(ctx: AppContext) -> flet.View:
             flet.Text("Export raw keys", size=18, weight=flet.FontWeight.BOLD, color=flet.Colors.RED_700),
             ctx.controls["el_rawkey_page"],
         ],
+    )
+
+
+# ===================== Developer: Storage inspector ========================
+
+async def _dev_storage_delete_click(ctx: AppContext, key: str) -> None:
+    """Delete one ``shared_preferences`` key + show a status dialog, then refresh.
+
+    Mirrors the legacy ``storage_delete_button_click`` closure (byte-identical
+    dialog strings) and additionally re-runs :func:`dev_storage_enter` so the
+    list reflects the deletion immediately — the legacy page built its list once
+    at bootstrap, so deletes weren't visible until full app restart.
+    """
+    page = ctx.page
+    try:
+        await page.shared_preferences.remove(key)
+    except Exception as er:
+        print(f'Error deleted data from shared_preferences: {er}')
+        page.show_dialog(
+            flet.AlertDialog(
+                title=flet.Text("Во время удаления произошла ошибка!"),
+            )
+        )
+    else:
+        page.show_dialog(
+            flet.AlertDialog(
+                title=flet.Text(f"{key} успешно удалён!"),
+            )
+        )
+    await dev_storage_enter(ctx)
+
+
+async def dev_storage_enter(ctx: AppContext) -> None:
+    """(Re)build the Storage inspector page contents into
+    ``ctx.controls["el_dev_storage_page"]``.
+
+    Lists every ``shared_preferences`` key/value pair (JSON-decoded when
+    possible) with a per-row Delete button wired to
+    :func:`_dev_storage_delete_click` via ``asyncio.create_task`` from a sync
+    lambda (Group 5 rule #7 — flet only awaits handlers for which
+    ``inspect.iscoroutinefunction`` is True, so a plain ``lambda e: coro`` would
+    silently drop the coroutine).
+    """
+    page = ctx.page
+    el_dev_storage_page = ctx.controls["el_dev_storage_page"]
+    el_dev_storage_page.controls.clear()
+    lv = flet.ListView(expand=1, spacing=10, padding=20, auto_scroll=True)
+    keys = await page.shared_preferences.get_keys('')
+    for i, key in enumerate(keys):
+        val = await page.shared_preferences.get(key)
+        if isinstance(val, str):
+            try:
+                val = json.loads(val)
+            except json.JSONDecodeError:
+                pass
+        lv.controls.append(
+            flet.Row(
+                scroll=flet.ScrollMode.AUTO,
+                controls=[
+                    flet.ElevatedButton(
+                        content="Delete",
+                        on_click=lambda ev, k=key: asyncio.create_task(
+                            _dev_storage_delete_click(ctx, k)
+                        ),
+                        data=key,
+                    ),
+                    flet.Text(f"{i+1}. {key}: {val}", max_lines=2),
+                ]
+            )
+        )
+    el_dev_storage_page.controls.append(lv)
+    page.update()
+
+
+def build_dev_storage_page(ctx: AppContext) -> flet.View:
+    """Build the Storage inspector page (binds the shared ``el_dev_storage_page``
+    column; ``dev_storage_enter(ctx)`` repopulates it on each visit)."""
+    view_pop = ctx.controls["view_pop"]
+    navbar = ctx.controls["navbar"]
+    return flet.View(
+        route="dev-storage-page",
+        appbar=flet.AppBar(
+            title=flet.Text("DevTools: Storage"),
+            color="white",
+            bgcolor="cyan",
+            leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
+        ),
+        navigation_bar=navbar,
+        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
+        scroll=flet.ScrollMode.AUTO,
+        controls=[
+            flet.Text(value='Редактирование client_storage:', size=20),
+            ctx.controls["el_dev_storage_page"],
+        ]
     )
