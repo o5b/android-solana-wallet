@@ -2011,8 +2011,8 @@ untouched — the page only reads/writes `shared_preferences`.
   console errors across all interactions.
 
 #### Phase 7 — Group 6g: Final orchestrator
-The **final** Phase-7 group (the refactor is COMPLETE). UI-only extraction.
-Lifted every remaining piece of bootstrap + routing plumbing out of `main()`
+The **final** Phase-7 group (the refactor is COMPLETE). UI-only extraction
+(committed `8734529`). Lifted every remaining piece of bootstrap + routing plumbing out of `main()`
 into `src/ui/app.py` (373 lines). `main.py` shrank 540→**39 lines** (a thin
 `async def main(page): await build_app(page)` + `flet.run(main)`). The
 `solana/` business layer is untouched — `app.py` wires together the
