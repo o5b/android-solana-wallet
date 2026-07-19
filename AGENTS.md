@@ -935,9 +935,9 @@ assert on the built control structure.
     remain.
 
 #### Phase 7 — Group 6a: Wallet create / recover / add pages
-UI-only extraction (in working tree, not yet committed). Lifted the three
-wallet-entry screens (Create New Wallet / Recover Wallet / Add Wallet Address)
-out of `main()` into `src/ui/components/wallet_create.py`. `main.py`
+UI-only extraction (committed `d9941c7` + review fix `f684894`). Lifted the
+three wallet-entry screens (Create New Wallet / Recover Wallet / Add Wallet
+Address) out of `main()` into `src/ui/components/wallet_create.py`. `main.py`
 2792→2194 (−598 lines). The `solana/` business layer is untouched.
 - **NEW** `src/ui/components/wallet_create.py` (663 lines): `build_wallet_pages(ctx)`
   → `(create_wallet_page, recover_wallet_page, add_wallet_address_page)`. Each
@@ -999,6 +999,13 @@ out of `main()` into `src/ui/components/wallet_create.py`. `main.py`
   triggers the seed-phrase reveal dialog (proving `generate_new_solana_wallet_button`
   runs end-to-end in the extracted module and `create_solana_wallet()` returned
   successfully).
+- **REVIEW FIX** (`f684894`, from `/review` on commit `d9941c7`):
+  - `error_add_address_solana_wallet_card` now references `txt_add_address_error`
+    (was `txt_recover_error` — pre-existing bug surfaced by the move; the
+    "Input the wallet address" validation message now actually shows).
+  - Removed the unused `import asyncio` newly introduced by the extraction
+    (no `asyncio.*` references in the module; async handlers use
+    `page.run_task`/`await page.shared_preferences.*`).
 
 
 #### Phase 7 — Group 5: Transfer screens (SOL/SPL, burn/close)
