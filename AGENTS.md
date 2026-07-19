@@ -934,8 +934,10 @@ assert on the built control structure.
     (swap page) DONE (see "Phase 7 — Group 6b: Swap page" below); Group 6c
     (PIN gate + lock dialogs) DONE (see "Phase 7 — Group 6c: PIN gate + lock
     dialogs" below); Group 6d (Settings + More hub + experience) DONE (see
-    "Phase 7 — Group 6d: Settings + More hub + experience" below); sub-groups
-    6e+ (balance+history+cards / final orchestrator) remain.
+     "Phase 7 — Group 6d: Settings + More hub + experience" below); Group 6e
+     (balance + history + address page + wallet cards) DONE (see "Phase 7 —
+     Group 6e: Balance + history + address page + wallet cards" below);
+     sub-groups 6f (dev storage page) + 6g (final orchestrator) remain.
 
 #### Phase 7 — Group 6a: Wallet create / recover / add pages
 UI-only extraction (committed `d9941c7` + review fix `f684894`). Lifted the
@@ -1702,6 +1704,197 @@ block (~370 lines) out of `main()` into `src/ui/components/addressbook.py`.
   close_dialog, + per-session isolation); Playwright (PIN `1234`): 0 console errors,
   Address Book renders + add/persist contact to `flutter.addressbook.contacts`;
   `tests/test_address_check.py` 35/35.
+
+#### Phase 7 — Group 6e: Balance + history + address page + wallet cards
+UI-only extraction. Lifted the largest cohesive block in `main.py` — every
+screen and handler that spins off the homepage wallet cards — into
+`src/ui/components/balance.py` (1235 lines) + `src/ui/qr.py` (40 lines).
+`main.py` 1530→**560** (−970 lines). The `solana/` business layer is untouched.
+
+- **NEW** `src/ui/qr.py` (40 lines): `generate_qr_base64(data, box_size=8,
+  border=2) -> str`. Pure helper (no flet dep) extracted from the top of
+  `main.py`. Lives in its own module so any future `ui/` consumer can render a
+  QR without pulling the balance module.
+- **NEW** `src/ui/components/balance.py` (1235 lines): the full wallet-cards +
+  address-page + balance + history flow. Module-level async `(ctx, …)`
+  functions; no module-level mutable state (web-mode's per-client isolation
+  preserved). Public surface:
+  - **`get_storage_data(ctx, prefix="")`** — the legacy `shared_preferences`
+    reader, kept verbatim (injects `storage_key` into dict records so the
+    Wallet Info / delete flows still work). NOT replaced with
+    `ui.wallets.load_wallets` because that helper deliberately drops
+    `storage_key`.
+  - **`get_wallets_cards(ctx) -> flet.ListView`** — homepage wallet list
+    (one Card per wallet + watch-only badge). `go_to_address_page` wired via
+    a named `async def` adapter inside the function (Group 5 rule #7).
+  - **`delete_wallet_click(ctx, e)`** — removes `wallet.<key>` + pushes home
+    route + shows confirmation dialog.
+  - **`wallet_info_click(ctx, e)`** — the Wallet Info dialog (QR + reveal-all
+    fields + edit name/description + Copy All Data). Decrypts on demand via
+    **`ctx.decrypt_for_display`** (the Group 6c ctx accessor).
+  - **`show_qr_click(ctx, e)`** — the "Show QR Code" / receive-SOL dialog.
+  - **`go_to_address_page(ctx, e)`** — builds the per-wallet address page into
+    `ctx.controls["el_address_page"]` (name / description / address / QR /
+    network checkboxes / Show History + Show Balance buttons) and pushes the
+    route.
+  - **`get_history_button_click(ctx, e)`** — progressive-disclosure history
+    (Simple header-only / Pro expandable Signature-Status-Fee / Dev +
+    Slot-Version-CU + logs + CSV export via `ctx.controls["csv_file_picker"]`).
+  - **`get_balance_button_click(ctx, e)`** — SOL + SPL balances, USD portfolio
+    banner (SOL-only subtotal in Simple mode), spam-filter summary banner,
+    per-network rows with transfer / swap / airdrop buttons. Simple mode
+    skips SPL + uses the NFT-gallery fast path (`include_transfer_cost=False,
+    include_image_bytes=False`).
+  - **`build_address_page(ctx) -> flet.View`** — view builder that binds the
+    shared `el_address_page` Column. The balance / history handlers populate
+    `ctx.controls["el_token_balance_data"]` which is itself a child of
+    `el_address_page` (appended by `go_to_address_page`).
+- **`src/main.py`** (1530→560):
+  - **Imports**: added `from ui.components.balance import (build_address_page,
+    get_balance_button_click, get_history_button_click, get_wallets_cards,
+    go_to_address_page)` + `import json` (still needed for `dev_tools_storage_list`
+    — Group 6f scope). **Removed** now-unused imports after the move:
+    `from solana.balance import get_sol_spl_balance`, `from solana.prices import …`,
+    `from solana.spam_filter import …`, `from solana.transaction_history import …`,
+    `from solana.history_csv import …`, `from solana.security import WATCH_ONLY_FIELD`,
+    `from ui.experience import feature, get_experience`, `from ui.formatting
+    import short_addr`, the whole `from ui.components.addressbook import (…)`
+    block slimmed to just `addressbook_enter`, the whole `from ui.components.
+    transfer import (…)` block slimmed to `build_spl_token_page` /
+    `build_token_page` / `open_spl_token_page`, removed
+    `from ui.components.swap import go_to_swap_page_click`,
+    `from datetime import datetime`, `import os`, `import base64`, `import io`,
+    `import qrcode`. Also **removed** the module-level `MAINNET_RPC` constant
+    (every `ui/` module that needs it carries its own local copy; nothing
+    imports it from main.py).
+  - **Registers 3 shared controls**: `ctx.controls["csv_file_picker"]`,
+    `ctx.controls["el_address_page"]`, `ctx.controls["el_token_balance_data"]`
+    (the two Column holders are still created in `main()` so the View builder
+    + handlers share one live object each).
+  - **Deleted closures** (~970 lines): `get_storage_data`, `get_wallets_cards`,
+    `delete_wallet_click`, `wallet_info_click`, `show_qr_click`,
+    `go_to_address_page`, `get_history_button_click`, `get_balance_button_click`,
+    `generate_qr_base64` → a migration-marker comment block. Replaced the
+    ~16-line `address_page = flet.View(…)` definition with
+    `address_page = build_address_page(ctx)` (built once at bootstrap at the
+    same code location — `route_change`'s `address-page` branch only gained a
+    `ctx.controls["el_token_balance_data"].controls.clear()` line that was
+    already there).
+- **REGRESSION FIX** (restored by the move): in Group 6c, 5 adapter closures
+  (`on_go_to_token_page`, `on_go_to_spl_token_page`, `on_spl_arrow_drop_down`,
+  `on_request_airdrop`, `on_go_to_swap_page`) were accidentally deleted
+  alongside `lock_app`, but their references remained in `get_balance_button_click`
+  → clicking Transfer / Swap / Airdrop / a token-detail expander on the balance
+  screen would have raised `NameError`. The move to `balance.py` naturally fixes
+  this: the 5 adapters are now defined **inside** `get_balance_button_click` as
+  named `async def` adapter closures (Group 5 rule #7), wrapping the
+  `(ctx, e)` transfer/swap handlers so flet's `iscoroutinefunction` check
+  detects + awaits them.
+- **Pre-existing latent bug FIXED in scope**: the address-page "Copy Address"
+  button was wired with `on_click=lambda e: page.clipboard.set(addr)` — a
+  lambda returning a coroutine that flet 0.82.2's `__fire_event` silently
+  drops (only `iscoroutinefunction(handler)` is awaited; lambdas always fail
+  that check). Replaced with a named `async def _copy_address(_ev)` adapter
+  inside `go_to_address_page`.
+- **Migration-contract rule #11** (Group 6e): **balance / history / address
+  page / wallet cards → `ui/components/balance` module.** Any future extracted
+  module that needs to render the homepage wallet list, the per-wallet address
+  page, or invoke the balance / history handlers imports from
+  `ui.components.balance` and passes `ctx` — never reaches into `solana/`
+  primitives directly. **QR rendering → `ui.qr`** (pure, no flet dep).
+  **`csv_file_picker` access → `ctx.controls["csv_file_picker"]`** (registered
+  by `main()` at bootstrap; the CSV picker must also be appended to
+  `page.services` for the save dialog to actually render).
+- **Migration-contract rule #7 reaffirmed** (Group 5): **`lambda e:
+  coro_call` is BROKEN as a flet `on_click` in flet 0.82.2.** Confirmed by
+  reading `venv/.../flet/controls/base_control.py:412` — `__fire_event` does
+  `if inspect.iscoroutinefunction(event_handler): await event_handler(e); …
+  elif callable(event_handler): event_handler(e)` and a plain lambda always
+  falls into the sync branch (lambdas can't be `async def`), so the returned
+  coroutine is silently dropped (only signalled by `RuntimeWarning: coroutine
+  ... was never awaited` in the server logs). **Always use a named `async def`
+  adapter closure.** (Note: `functools.partial(async_fn, ctx)` DOES work —
+  `inspect.iscoroutinefunction(partial)` returns True — but named adapters are
+  the established convention.) Several pre-existing broken lambdas remain in
+  `ui/components/transfer.py` (Group 5 module — the arrow-drop toggle, contact
+  picker, etc.); they're out of Group 6e scope and tracked as a follow-up.
+- **INVARIANTS preserved**: `homepage.controls[-1]` still the wallets list;
+  `address_page` binds the same `el_address_page` object the handlers rebuild
+  via `ctx.controls`; `el_token_balance_data` is still appended as the LAST
+  child of `el_address_page` (the balance + history handlers' positional reads
+  of `e.control.parent.parent.controls[-3].controls[0].controls[N]` for the
+  network checkboxes still resolve identically); the `data` dict passed to
+  transfer/swap buttons is byte-identical to before (`wallet_address` /
+  `network` / `spl_amount` / `sol_amount` / `symbol` / `raw_data` /
+  `wallet_data`); `solana/` untouched; per-session state isolation preserved
+  (no module-level mutable state — all state lives in `ctx.controls` /
+  `ctx.session`).
+- **Key symbols** (`src/main.py` — re-grep, line numbers drift): import
+  `from ui.components.balance import (build_address_page,
+  get_balance_button_click, get_history_button_click, get_wallets_cards,
+  go_to_address_page)` (~L26); `ctx.controls["csv_file_picker"]` (~L120);
+  `ctx.controls["el_address_page"]` / `["el_token_balance_data"]` (~L144);
+  migration marker block (~L160); `address_page = build_address_page(ctx)`
+  (~L485); `route_change` `address-page` branch (~L354); homepage
+  `await get_wallets_cards(ctx)` (~L447, ~L464).
+- **VERIFIED**: `py_compile` on all 4 files (`main.py` + `balance.py` + `qr.py`
+  + `context.py`); `git diff --check` clean. **NEW** `tests/test_balance_ui.py`
+  (**77 checks**): `ui.qr.generate_qr_base64` (base64 + PNG magic + determinism
+  + distinct inputs); `get_storage_data` (JSON decode + storage_key injection
+  + non-JSON passthrough + prefix filter); `get_wallets_cards` (one Card per
+  wallet + watch-only badge visibility + empty case); `delete_wallet_click`
+  (storage removal + route push + dialog + no-storage_key noop);
+  `wallet_info_click` (locked-passthrough decrypt + watch-only tag);
+  `show_qr_click` (QR image + address text in dialog); `go_to_address_page`
+  (builds into el_address_page + route push + name/desc/address/network
+  checkboxes/Show History + Show Balance + el_token_balance_data last);
+  `get_history_button_click` (mocked `get_transaction_history`; Simple header-only
+  / Pro expandable Signature + Fee / Dev CSV button + Slot-Version-CU; no-networks
+  edge case); `get_balance_button_click` (mocked balance + prices + spam; Simple
+  `include_transfer_cost=False` / Pro `=True`; transfer+swap buttons rendered;
+  Swap disabled on devnet; **data-dict contract preserved** — every key the
+  transfer/swap handlers read; Simple-mode SOL-only banner subtotal; empty-result
+  edge case); `build_address_page` (View structure + el_address_page binding +
+  Information header). Existing offline suites green (`test_wallet_create_ui`
+  39, `test_transfer_ui` 49, `test_swap_ui`, `test_security_gate_ui` 62,
+  `test_settings_ui` 26, `test_more_ui` 50, `test_address_check` 35,
+  `test_sns` 11, `test_history_csv`, `test_spam_filter` 31, `test_priority_fee`,
+  `test_burn_close`, `test_liquid_staking`, `test_wc2_integration`).
+  End-to-end via Playwright (PIN `1234`, W1 watch-only, app pre-set to Simple
+  mode): **boots clean, 0 console errors**; unlock → homepage renders W1 card
+  (`get_wallets_cards(ctx)` end-to-end); **Show More** → `address-page` renders
+  with name/description/address/QR/Solana Networks (mainnet-beta checked)/Show
+  History + Show Balance buttons (`go_to_address_page(ctx, e)` end-to-end);
+  **Show Balance** → "Balance for AuPjPzHABDxeug5fidMcsNz6Aqwm3Amk9NcutqjDirWz
+  received successfully!" + mainnet row renders with both Transfer + Swap
+  buttons correctly **disabled** (0 mainnet SOL) — this proves
+  `get_balance_button_click(ctx, e)` runs end-to-end in the new module AND the
+  5 deleted adapter closures from Group 6c are properly restored as in-module
+  closures (no NameError); **Show History** → "Network: mainnet-beta / No
+  transactions found." 0 console errors across all navigations.
+- **Flet headless-testing gotcha** (for the test scaffolding): the balance +
+  history handlers read network checkbox state via the fragile positional chain
+  `e.control.parent.parent.controls[-3].controls[0].controls[N].value`. To
+  exercise them headlessly, `flet.Row.parent` is read-only (no setter), so the
+  test builds the parent chain out of plain attribute containers (`_Box` /
+  `_Row` / `_Checkbox` mocks) rather than real flet controls — the handler only
+  reads `.value` / `.controls` / `.data` / `.disabled`, so plain containers
+  suffice.
+- **POST-REVIEW FIXES** (from `/review uncommitted` on the Group 6e tree,
+  APPROVE WITH SUGGESTIONS — both applied before commit):
+  - **Dead imports trimmed** in `src/main.py`: `get_balance_button_click`,
+    `get_history_button_click`, `go_to_address_page` were imported but never
+    invoked in main.py (they're internal to `balance.py`, wired via in-module
+    adapter closures). The import block now reads
+    `from ui.components.balance import (build_address_page, get_wallets_cards)`.
+  - **`_collect_selected_networks(e, with_names=False)` helper** extracted at
+    the top of `balance.py` — single source of truth for the positional
+    checkbox read + URL mapping. `get_history_button_click` calls it with
+    `with_names=True` (returns `[(name, url)]`); `get_balance_button_click`
+    calls it default (returns `[url]`). Drift risk eliminated: if the
+    address-page control order ever changes, only one place needs updating.
+    Also introduces a module-level `_NETWORKS` tuple (3 `(name, url)` pairs)
+    so the URL literals aren't duplicated 6× across the file.
 
 ## Security reminders
 
