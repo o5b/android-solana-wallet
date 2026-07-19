@@ -930,9 +930,10 @@ assert on the built control structure.
     WalletConnect" below, committed `c557166`). 5. ~~Transfer screens (SOL/SPL,
     burn/close)~~ — **DONE** (see "Phase 7 — Group 5" below, committed `cea4188`).
     6. Wallet cards + views (`homepage`/`more_page`/`settings_page`/`route_change`) —
-    **IN PROGRESS**. Group 6a (wallet create/recover/add pages) DONE; sub-groups 6b+
-    (swap / PIN gate / settings+More hub / balance+history+cards / final orchestrator)
-    remain.
+    **IN PROGRESS**. Group 6a (wallet create/recover/add pages) DONE; Group 6b
+    (swap page) DONE (see "Phase 7 — Group 6b: Swap page" below); sub-groups
+    6c+ (PIN gate / settings+More hub / balance+history+cards / final
+    orchestrator) remain.
 
 #### Phase 7 — Group 6a: Wallet create / recover / add pages
 UI-only extraction (committed `d9941c7` + review fix `f684894`). Lifted the
@@ -1006,6 +1007,82 @@ Address) out of `main()` into `src/ui/components/wallet_create.py`. `main.py`
   - Removed the unused `import asyncio` newly introduced by the extraction
     (no `asyncio.*` references in the module; async handlers use
     `page.run_task`/`await page.shared_preferences.*`).
+
+
+#### Phase 7 — Group 6b: Swap page (Jupiter)
+UI-only extraction (working tree, pending commit). Lifted the whole swap
+screen — `go_to_swap_page_button_click` (the balance-screen "Swap" button
+entry handler, with its nested `get_quote_button_click` /
+`swap_button_click` closures) + the `el_swap_page` holder Column + the
+`swap_page` View — out of `main()` into `src/ui/components/swap.py` (225
+lines). `main.py` 2194→2037 (−157 lines). The `solana/` business layer is
+untouched (pure reuse of `solana.swap.get_quote` / `solana.swap.swap`).
+- **NEW** `src/ui/components/swap.py` (225 lines): module-level
+  `SWAP_TOKENS` (4-token mainnet registry: SOL/USDC/USDT/JUP → mint +
+  decimals) + `_MAINNET` (self-contained, no dep on `main.py`'s
+  `MAINNET_RPC`). `go_to_swap_page_click(ctx, e)` reads the balance-screen
+  "Swap" button's `data` dict (`wallet_data` / `network` / `sol_amount` /
+  `wallet_address`), validates mainnet + `ctx.has_wallet_private_key`
+  (refuses watch-only / locked wallets with the same dialog messages as
+  before), then builds the swap form (in/out Dropdowns, amount + slippage
+  TextFields, Get Quote + Swap buttons, quote Text) into
+  `ctx.controls["el_swap_page"]` and pushes the route. The nested
+  `get_quote_button_click` / `swap_button_click` closures capture the
+  per-click form controls; the quote-cache + input-change guard (refuses to
+  swap if the inputs changed since the last quote) is lifted verbatim.
+  Swap signing uses **`ctx.get_wallet_private_key`** (replaces the legacy
+  closure — Group 3 ctx accessor). `build_swap_page(ctx)` returns the
+  `flet.View` (route `swap-page`, AppBar green, chrome via
+  `ctx.controls["view_pop"]`/`["navbar"]`, binds `el_swap_page`).
+- **`main.py`**: imports `build_swap_page`/`go_to_swap_page_click`;
+  **removed** now-unused `from solana.swap import ...`, `is_valid_amount`,
+  `Decimal`/`ROUND_HALF_UP`, and the module-level `SWAP_TOKENS` (all only
+  ever used by the swap handler — now in the module). **Kept** `MAINNET_RPC`
+  (still used at the balance-screen call site to disable the Swap button for
+  non-mainnet rows / zero balance). Registers `ctx.controls["el_swap_page"]`
+  next to its `flet.Column()` holder. Adds the named-async-def adapter
+  `async def on_go_to_swap_page(e): await go_to_swap_page_click(ctx, e)`
+  (Group 5 rule — never a lambda); the balance-screen "Swap" button's
+  `on_click` references it. Deleted the ~147-line swap handler closure → a
+  migration-marker comment. Replaced the ~16-line `swap_page = flet.View
+  (...)` definition with `swap_page = build_swap_page(ctx)` (built once at
+  bootstrap at the same code location — `route_change` `swap-page` branch
+  byte-unchanged).
+- **Coupling**: signer-key resolution via `ctx.get_wallet_private_key`/
+  `has_wallet_private_key` (Group 3 ctx accessors); `_MAINNET`/`SWAP_TOKENS`
+  local constants (no dep on main.py); view chrome via `ctx.controls`;
+  balance-screen button wired via the `on_go_to_swap_page` named-async-def
+  adapter (Group 5 rule). No outbound navigation (self-contained); no
+  per-session mutable state (quote cache + form controls are per-click
+  locals) → no `ctx.session` migration.
+- **INVARIANTS preserved**: `homepage.controls[-1]` still the wallets list;
+  `swap_page` binds the same `el_swap_page` object the handler rebuilds via
+  `ctx.controls`; the balance-screen "Swap" button's `data` dict is
+  byte-identical to before (handler's `data['network']` / `data
+  ['wallet_data']` reads untouched); validation order + dialog messages
+  byte-identical; `route_change` `swap-page` branch byte-unchanged;
+  `solana/` untouched.
+- **Key symbols** (`src/main.py` — re-grep, line numbers drift): import
+  `from ui.components.swap import build_swap_page, go_to_swap_page_click`
+  (~L93); `MAINNET_RPC` constant (~L115, kept); adapter `async def
+  on_go_to_swap_page(e): await go_to_swap_page_click(ctx, e)` (~L244);
+  `ctx.controls["el_swap_page"]` (~L1349); migration marker (~L1351);
+  `swap_page = build_swap_page(ctx)` (~L1840); balance-screen Swap button
+  `on_click=on_go_to_swap_page` (~L1215).
+- **VERIFIED**: `py_compile` on both files; `git diff --check` clean.
+  Existing offline suites green (`test_address_check` 35, `test_sns` 11,
+  `test_history_csv`, `test_spam_filter` 31, `test_transfer_ui` 49,
+  `test_priority_fee`, `test_burn_close`, `test_liquid_staking`,
+  `test_wc2_integration`). **NEW** `tests/test_swap_ui.py` (40 checks):
+  constants, `build_swap_page` View structure + chrome wiring, all three
+  validation paths (non-mainnet / watch-only / locked), happy-path form
+  construction (5 rows: wallet-label TextSpan / SOL→USDC Dropdowns with 4
+  options / amount + 1.0%-default slippage TextFields / Get Quote + Swap
+  ElevatedButtons / selectable quote Text), signatures. End-to-end via
+  Playwright (PIN `1234`, W1 watch-only): **boots clean, 0 console errors**;
+  balance screen builds the "Swap" button with `on_click=on_go_to_swap_page`
+  (adapter wired + reachable); button correctly **disabled** for the
+  devnet-only W1 watch-only wallet with 0 mainnet SOL.
 
 
 #### Phase 7 — Group 5: Transfer screens (SOL/SPL, burn/close)
