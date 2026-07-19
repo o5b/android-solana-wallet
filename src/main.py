@@ -22,22 +22,7 @@ from solana.spam_filter import (
 # is_valid_amount -> moved to ui.components.swap (Phase 7 Group 6b).
 from solana.transaction_history import get_transaction_history
 from solana.history_csv import transaction_history_to_csv
-from solana.security import (
-    WALLET_ENCRYPTED_FIELD,
-    WATCH_ONLY_FIELD,
-    SECRET_FIELDS,
-    MIN_PIN_LENGTH,
-    make_salt,
-    derive_key,
-    make_verifier,
-    verify_pin,
-    validate_pin,
-    encode_salt,
-    decode_salt,
-    encrypt_wallet_secrets,
-    decrypt_wallet_secrets,
-    get_secret,
-)
+from solana.security import WATCH_ONLY_FIELD
 from ui.experience import (
     SIMPLE,
     DEVELOPER,
@@ -91,6 +76,11 @@ from ui.components.transfer import (
 from ui.components.walletconnect import build_wc_page, wc_enter
 from ui.components.wallet_create import build_wallet_pages
 from ui.components.swap import build_swap_page, go_to_swap_page_click
+from ui.security_gate import (
+    auto_lock_watcher,
+    clear_client_storage,
+    refresh_lock_state,
+)
 
 
 def generate_qr_base64(data: str, box_size: int = 8, border: int = 2) -> str:
@@ -137,6 +127,11 @@ async def main(page: flet.Page):
 
     # ---------------------------------------------------------------------------
     # Security: PIN gate, encrypted secrets, auto-lock on inactivity.
+    # The PIN gate (setup/unlock dialogs, lock_app, refresh_lock_state,
+    # auto_lock_watcher, migrate_plaintext_wallets, clear_client_storage)
+    # -> moved to ui/security_gate.py (Phase 7 Group 6c). The in-memory
+    # `session` dict and the PIN constants stay here; the module mutates
+    # both via `ctx`.
     # ---------------------------------------------------------------------------
     PIN_SALT_KEY = "security.pin_salt"
     PIN_VERIFIER_KEY = "security.pin_verifier"
@@ -161,224 +156,11 @@ async def main(page: flet.Page):
         auto_lock_seconds=AUTO_LOCK_SECONDS,
     )
 
-    def reset_activity():
-        """Mark now as the most recent user activity (postpones auto-lock)."""
-        session["last_activity"] = time.time()
-
-    async def load_pin():
-        """Return (salt_bytes, verifier_str) or (None, None) if no PIN is set."""
-        if not await page.shared_preferences.contains_key(PIN_SALT_KEY):
-            return None, None
-        salt_str = await page.shared_preferences.get(PIN_SALT_KEY)
-        verifier = await page.shared_preferences.get(PIN_VERIFIER_KEY)
-        if not salt_str or not verifier:
-            return None, None
-        try:
-            return decode_salt(salt_str), verifier
-        except Exception:
-            return None, None
-
-    async def save_pin(salt: bytes, verifier: str):
-        await page.shared_preferences.set(PIN_SALT_KEY, encode_salt(salt))
-        await page.shared_preferences.set(PIN_VERIFIER_KEY, verifier)
-
-    async def migrate_plaintext_wallets(key: bytes):
-        """Encrypt the secrets of every legacy (plaintext) wallet record.
-
-        Called once after a PIN is first set up.  Already-encrypted records
-        and watch-only wallets (empty secrets) are handled gracefully.
-        """
-        keys = await page.shared_preferences.get_keys("wallet.")
-        for k in keys:
-            val = await page.shared_preferences.get(k)
-            if not isinstance(val, str):
-                continue
-            try:
-                wallet = json.loads(val)
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if not isinstance(wallet, dict):
-                continue
-            if wallet.get(WALLET_ENCRYPTED_FIELD):
-                continue  # already encrypted
-            encrypted = encrypt_wallet_secrets(wallet, key)
-            await page.shared_preferences.set(k, json.dumps(encrypted))
-
-    def is_unlocked() -> bool:
-        return session["unlocked"] and session["key"] is not None
-
-    # encrypt_for_storage -> moved to AppContext (Phase 7 Group 6a). The
-    # legacy `get_wallet_private_key`/`has_wallet_private_key` closures below
-    # stay until their remaining main.py call sites migrate to ctx.*.
-
-    def get_wallet_private_key(wallet: dict) -> str:
-        """Plaintext private key hex for a wallet ('' if watch-only / locked)."""
-        if not is_unlocked():
-            return ""
-        return get_secret(wallet, "private_key_hex", session["key"])
-
-    def has_wallet_private_key(wallet: dict) -> bool:
-        return bool(get_wallet_private_key(wallet))
-
     # make_priority_fee_block / _pf_from_data -> moved to ui/components/priority_fee.py (Phase 7).
     # resolve_signing_key -> moved to ui/components/transfer.py (Phase 7 Group 5).
-
-    def decrypt_for_display(wallet: dict) -> dict:
-        """Wallet dict with secrets decrypted (for the Wallet Info dialog)."""
-        if not is_unlocked():
-            return wallet
-        return decrypt_wallet_secrets(wallet, session["key"])
-
-    # Async click-handler adapters binding the extracted transfer module's
-    # `(ctx, e)` handlers into flet's `(e)` on_click signature (lambdas would
-    # silently drop the returned coroutine — Phase 7 Group 5).
-    async def on_go_to_spl_token_page(e): await go_to_spl_token_page_click(ctx, e)
-    async def on_go_to_token_page(e): await go_to_token_page_click(ctx, e)
-    async def on_spl_arrow_drop_down(e): await spl_token_arrow_drop_down_click(ctx, e)
-    async def on_request_airdrop(e): await request_airdrop_click(ctx, e)
-    async def on_go_to_swap_page(e): await go_to_swap_page_click(ctx, e)
-
-    async def lock_app():
-        """Drop the in-memory key and require the PIN again."""
-        session["unlocked"] = False
-        session["key"] = None
-        await refresh_lock_state()
-
-    def close_lock_dialog():
-        if session["lock_dialog"] is not None:
-            session["lock_dialog"].open = False
-            session["lock_dialog"] = None
-            page.update()
-
-    async def show_setup_dialog():
-        tf1 = flet.TextField(
-            label=f"Create a PIN ({MIN_PIN_LENGTH}+ digits)", password=True,
-            can_reveal_password=True, keyboard_type=flet.KeyboardType.NUMBER, autofocus=True,
-        )
-        tf2 = flet.TextField(
-            label="Confirm PIN", password=True, can_reveal_password=True,
-            keyboard_type=flet.KeyboardType.NUMBER,
-        )
-        err = flet.Text("", color="red")
-
-        async def confirm(ev):
-            p1, p2 = tf1.value or "", tf2.value or ""
-            if not validate_pin(p1):
-                err.value = f"PIN must be {MIN_PIN_LENGTH}+ digits."
-                page.update(); return
-            if p1 != p2:
-                err.value = "PINs do not match."
-                page.update(); return
-            salt = make_salt()
-            key = derive_key(p1, salt)
-            verifier = make_verifier(key)
-            await save_pin(salt, verifier)
-            await migrate_plaintext_wallets(key)
-            session["unlocked"] = True
-            session["key"] = key
-            reset_activity()
-            close_lock_dialog()
-
-        dlg = flet.AlertDialog(
-            modal=True,
-            title=flet.Text("Set up a PIN"),
-            content=flet.Column(
-                [
-                    flet.Text("This PIN encrypts your private keys at rest and unlocks the app. Do not forget it: lost PINs cannot be recovered.", size=12),
-                    tf1, tf2, err,
-                ],
-                tight=True,
-            ),
-            actions=[flet.ElevatedButton("Set PIN", on_click=confirm)],
-            actions_alignment=flet.MainAxisAlignment.END,
-        )
-        session["lock_dialog"] = dlg
-        page.show_dialog(dlg)
-
-    async def show_unlock_dialog():
-        tf = flet.TextField(
-            label="Enter PIN", password=True, can_reveal_password=True,
-            keyboard_type=flet.KeyboardType.NUMBER, autofocus=True,
-        )
-        err = flet.Text("", color="red")
-
-        async def do_unlock(ev):
-            salt, verifier = await load_pin()
-            pin = tf.value or ""
-            if salt is not None and verify_pin(pin, salt, verifier):
-                session["unlocked"] = True
-                session["key"] = derive_key(pin, salt)
-                # Defensive: encrypt any wallet that slipped through while locked.
-                await migrate_plaintext_wallets(session["key"])
-                reset_activity()
-                tf.value = ""
-                err.value = ""
-                close_lock_dialog()
-            else:
-                err.value = "Incorrect PIN."
-                page.update()
-
-        async def forgot_pin(ev):
-            # Losing the PIN means the encrypted secrets are unrecoverable.
-            # Offer a destructive reset that wipes the whole wallet store.
-            async def do_wipe(inner):
-                await clear_client_storage()
-                session["unlocked"] = False
-                session["key"] = None
-                session["lock_dialog"] = None
-                confirm_dlg.open = False
-                page.update()
-                await refresh_lock_state()  # PIN wiped -> shows the setup dialog
-
-            async def cancel(inner):
-                confirm_dlg.open = False
-                page.update()
-                await show_unlock_dialog()  # re-show the unlock dialog
-
-            confirm_dlg = flet.AlertDialog(
-                modal=True,
-                title=flet.Text("Reset everything?"),
-                content=flet.Text("This will permanently delete the PIN and ALL stored wallets (their encrypted keys become unrecoverable). Only continue if you have your seed phrases backed up."),
-                actions=[
-                    flet.TextButton("Cancel", on_click=cancel),
-                    flet.ElevatedButton("Reset & Wipe", on_click=do_wipe, icon=flet.Icons.DELETE_FOREVER),
-                ],
-                actions_alignment=flet.MainAxisAlignment.END,
-            )
-            page.show_dialog(confirm_dlg)
-
-        dlg = flet.AlertDialog(
-            modal=True,
-            title=flet.Text("Enter PIN"),
-            content=flet.Column([tf, err], tight=True),
-            actions=[
-                flet.ElevatedButton("Unlock", on_click=do_unlock),
-                flet.TextButton("Forgot PIN?", on_click=forgot_pin),
-            ],
-            actions_alignment=flet.MainAxisAlignment.END,
-        )
-        tf.on_submit = do_unlock
-        session["lock_dialog"] = dlg
-        page.show_dialog(dlg)
-
-    async def refresh_lock_state():
-        """Show the setup dialog (first run) or unlock dialog (subsequent runs)."""
-        salt, _ = await load_pin()
-        if salt is None:
-            await show_setup_dialog()
-        else:
-            await show_unlock_dialog()
-
-    async def auto_lock_watcher():
-        """Periodically lock the app after AUTO_LOCK_SECONDS of inactivity."""
-        while True:
-            await asyncio.sleep(10)
-            if (
-                session["lock_dialog"] is None
-                and is_unlocked()
-                and (time.time() - session["last_activity"]) > AUTO_LOCK_SECONDS
-            ):
-                await lock_app()
+    # Wallet-key accessors (is_unlocked / get_wallet_private_key /
+    # has_wallet_private_key / encrypt_for_storage / decrypt_for_display) ->
+    # all moved to AppContext (Phase 7 Group 6c); main.py call sites use ctx.*.
 
     async def get_storage_data(prefix=''):
         data_list = []
@@ -515,7 +297,7 @@ async def main(page: flet.Page):
                 await page.push_route("/")
 
         async def copy_data(e):
-            copy_src = decrypt_for_display(wallet)
+            copy_src = ctx.decrypt_for_display(wallet)
             copy_val = {k: v for k, v in copy_src.items() if k != 'storage_key'}
             await page.clipboard.set(json.dumps(copy_val, indent=2))
 
@@ -523,7 +305,7 @@ async def main(page: flet.Page):
         tf_desc = flet.TextField(label="Description", value=wallet.get('description', ''), multiline=True)
 
         # Decrypt secrets on demand (records are stored encrypted once a PIN exists).
-        w_dec = decrypt_for_display(wallet)
+        w_dec = ctx.decrypt_for_display(wallet)
         watch_only_tag = "  (watch-only)" if wallet.get(WATCH_ONLY_FIELD) else ""
         info_text = f"Address: {wallet.get('address_base58')}\n" \
                     f"Created: {wallet.get('created')}{watch_only_tag}\n" \
@@ -1502,10 +1284,7 @@ async def main(page: flet.Page):
             )
         page.update()
 
-    async def clear_client_storage():
-        keys = await page.shared_preferences.get_keys('')
-        for key in keys:
-            await page.shared_preferences.remove(key)
+    # clear_client_storage -> moved to ui/security_gate.py (Phase 7 Group 6c).
 
     # ---- Navigation handlers used by the "More" hub ----
     async def nav_addressbook(e): await page.push_route("addressbook-page")
@@ -1533,7 +1312,7 @@ async def main(page: flet.Page):
 
     async def _do_clear_storage(dlg):
         ctx.close_dialog(dlg)
-        await clear_client_storage()
+        await clear_client_storage(ctx)
         page.show_dialog(flet.AlertDialog(title=flet.Text("All local storage cleared.")))
         await page.push_route("/")
 
@@ -1636,7 +1415,7 @@ async def main(page: flet.Page):
         )
 
     async def route_change(route):
-        reset_activity()
+        ctx.reset_activity()
         page.views.clear()
         homepage.controls[-1] = await get_wallets_cards()
         page.views.append(homepage)
@@ -1687,7 +1466,7 @@ async def main(page: flet.Page):
         page.update()
 
     async def view_pop(view):
-        reset_activity()
+        ctx.reset_activity()
         print(f'########### start >> page.views >> len={len(page.views)}, page.views: {page.views}')
         page.views.pop()
         print(f'########### after pop() >> page.views >> len={len(page.views)}, page.views: {page.views}')
@@ -2030,8 +1809,8 @@ async def main(page: flet.Page):
     page.update()
 
     # Start the inactivity auto-lock watcher and present the PIN gate.
-    asyncio.create_task(auto_lock_watcher())
-    await refresh_lock_state()
+    asyncio.create_task(auto_lock_watcher(ctx))
+    await refresh_lock_state(ctx)
 
 
 flet.run(main)

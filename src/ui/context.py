@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 
 import flet
 
-from solana.security import encrypt_wallet_secrets, get_secret
+from solana.security import decrypt_wallet_secrets, encrypt_wallet_secrets, get_secret
 
 
 @dataclass
@@ -118,3 +118,15 @@ class AppContext:
         if self.is_unlocked():
             return encrypt_wallet_secrets(value, self.session["key"])
         return value
+
+    def decrypt_for_display(self, wallet: dict) -> dict:
+        """Wallet dict with secrets decrypted (for the Wallet Info dialog).
+
+        Mirrors the legacy ``decrypt_for_display`` closure: returns the record
+        unchanged while the app is locked, otherwise decrypts every secret
+        field in place via :func:`solana.security.decrypt_wallet_secrets`.
+        Used by the Wallet Info dialog (Group 6e — still in ``main.py``).
+        """
+        if not self.is_unlocked():
+            return wallet
+        return decrypt_wallet_secrets(wallet, self.session["key"])
