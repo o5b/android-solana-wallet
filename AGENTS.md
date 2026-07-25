@@ -344,7 +344,7 @@ If the wallet was added without a private key, an "Enter Secret" field appears o
     (`swap.send_raw_transaction`) + optional confirm (`transfer_sol.confirm_transaction`).
   - `preview_transaction(tx_b64)` — `{version, fee_payer, accounts, required_signatures,
     programs, unknown_programs}` for the future tx-simulation/anti-phishing UI.
-  - SIWS: `SIWSPayload` (pydantic, snake_case + camelCase aliases), `format_siws_message`
+  - SIWS: `SIWSPayload` (plain class, snake_case + camelCase aliases), `format_siws_message`
     (canonical plaintext), `sign_in_with_solana(pk_hex, payload)`.
   - `KNOWN_PROGRAMS` registry + `describe_program()` annotate previews.
   - Verified headless (sign/verify round-trip, SIWS, sign_transaction on a crafted legacy tx,

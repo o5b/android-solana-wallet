@@ -30,7 +30,6 @@ import base58
 
 from nacl.signing import VerifyKey  # type: ignore
 from nacl.exceptions import BadSignatureError  # type: ignore
-from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from solana.keypair import Keypair
 from solana.utils import shortvec_encoding as shortvec
@@ -393,34 +392,89 @@ async def sign_and_send_transaction(
 # ---------------------------------------------------------------------------
 # Sign In With Solana (SIWS) — CAIP-122 / Phantom spec
 # ---------------------------------------------------------------------------
-class SIWSPayload(BaseModel):
+class SIWSPayload:
     """Structured Sign In With Solana payload (CAIP-122).
 
-    Accepts both snake_case and camelCase input via field aliases, so a dApp can
-    send ``{"chainId": "mainnet-beta", "issuedAt": "..."}`` directly.
+    Accepts both snake_case and camelCase input, so a dApp can send
+    ``{"chainId": "mainnet-beta", "issuedAt": "..."}`` directly.
+
+    Drop-in replacement for the former pydantic model — same public API
+    (``model_validate``, ``model_dump``) so callers don't change.
     """
 
-    model_config = ConfigDict(populate_by_name=True)
+    # Fields that must be single-line (no CR/LF — format-injection guard).
+    _LINE_FIELDS = ("domain", "address", "statement", "uri", "version", "nonce", "chain_id")
 
-    domain: str
-    address: str
-    statement: Optional[str] = None
-    uri: str
-    version: str = "1"
-    nonce: str
-    chain_id: str = Field(default="mainnet-beta", alias="chainId")
-    issued_at: Optional[str] = Field(default=None, alias="issuedAt")
-    expiration_time: Optional[str] = Field(default=None, alias="expirationTime")
+    # camelCase alias → snake_case attribute
+    _ALIASES = {
+        "chainId": "chain_id",
+        "issuedAt": "issued_at",
+        "expirationTime": "expiration_time",
+    }
+    # snake_case attribute → camelCase alias (reverse map)
+    _ALIASES_REV = {v: k for k, v in _ALIASES.items()}
 
-    @field_validator("domain", "address", "statement", "uri", "version", "nonce", "chain_id")
+    def __init__(
+        self,
+        domain: str = "",
+        address: str = "",
+        statement: Optional[str] = None,
+        uri: str = "",
+        version: str = "1",
+        nonce: str = "",
+        chain_id: str = "mainnet-beta",
+        issued_at: Optional[str] = None,
+        expiration_time: Optional[str] = None,
+    ):
+        self.domain = domain
+        self.address = address
+        self.statement = statement
+        self.uri = uri
+        self.version = version
+        self.nonce = nonce
+        self.chain_id = chain_id
+        self.issued_at = issued_at
+        self.expiration_time = expiration_time
+        self._validate()
+
+    def _validate(self) -> None:
+        """CAIP-122 / EIP-4361 mandate single-line fields; embedded newlines
+        let a malicious dApp inject spoofed header/URI/nonce lines into the
+        signed plaintext. Reject CR/LF in every line-oriented field."""
+        for fname in self._LINE_FIELDS:
+            v = getattr(self, fname, None)
+            if v is not None and ("\n" in v or "\r" in v):
+                raise ValueError("SIWS field must not contain newline characters")
+
     @classmethod
-    def _no_newlines(cls, v: Optional[str]) -> Optional[str]:
-        # CAIP-122 / EIP-4361 mandate single-line fields; embedded newlines let a
-        # malicious dApp inject spoofed header/URI/nonce lines into the signed
-        # plaintext. Reject CR/LF in every line-oriented field.
-        if v is not None and ("\n" in v or "\r" in v):
-            raise ValueError("SIWS field must not contain newline characters")
-        return v
+    def model_validate(cls, data: Dict[str, Any]) -> "SIWSPayload":
+        """Build from a dict, accepting both snake_case and camelCase keys."""
+        kw = {}
+        for key, val in data.items():
+            # Resolve camelCase alias to snake_case attribute name
+            attr = cls._ALIASES.get(key, key)
+            kw[attr] = val
+        return cls(**kw)
+
+    def model_dump(self, by_alias: bool = False) -> Dict[str, Any]:
+        """Serialize to dict. ``by_alias=True`` emits camelCase keys."""
+        result: Dict[str, Any] = {
+            "domain": self.domain,
+            "address": self.address,
+            "statement": self.statement,
+            "uri": self.uri,
+            "version": self.version,
+            "nonce": self.nonce,
+            "chain_id": self.chain_id,
+            "issued_at": self.issued_at,
+            "expiration_time": self.expiration_time,
+        }
+        if by_alias:
+            out: Dict[str, Any] = {}
+            for k, v in result.items():
+                out[self._ALIASES_REV.get(k, k)] = v
+            return out
+        return result
 
 
 def format_siws_message(payload: SIWSPayload) -> str:
