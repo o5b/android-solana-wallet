@@ -181,3 +181,7 @@ secrets/
 .playwright-mcp/
 
 info/
+release.keystore
+*.jks
+android-signing.txt
+build/

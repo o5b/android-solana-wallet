@@ -2115,6 +2115,196 @@ already-extracted `ui/components/*` modules.
   refactor COMPLETE**: `main.py` is now a 39-line entry point; every screen
   + handler lives in `src/ui/` behind the `AppContext` migration contract.
 
+### Session 2026-07-26 (End-to-end test + first real mainnet SWAP)
+
+Full end-to-end smoke of the post-Phase-7 app. No code change shipped
+(working tree left clean). Two parts: (1) the standard offline+UI test
+matrix (already documented per-group above) and (2) the **first real
+mainnet SWAP** ever executed against this codebase — both swap directions,
+one in the UI, one headless.
+
+- **OFFLINE TESTS — 17 suites, ~600 checks, all PASS.** Ran the full
+  `tests/` set with `PYTHONPATH=src venv/bin/python tests/<file>.py`:
+  `test_address_check` (35), `test_app_ui` (113), `test_balance_ui` (77),
+  `test_burn_close`, `test_dev_storage_ui` (50), `test_history_csv`,
+  `test_liquid_staking`, `test_more_ui` (50), `test_priority_fee`,
+  `test_security_gate_ui` (62), `test_settings_ui` (26), `test_sns` (11),
+  `test_spam_filter` (31), `test_swap_ui`, `test_transfer_ui` (49),
+  `test_wallet_create_ui` (39), `test_wc2_integration`. No regressions
+  after Phase 7.
+- **UI SMOKE (Playwright, web mode, PIN `1234`, W1 watch-only on devnet,
+  Developer mode):** 0 console errors across the full flow. PIN unlock →
+  homepage (wallet cards + 5-tab navbar) → **Show More → Show Balance**
+  (devnet 4.035 SOL + 3 SPL tokens incl. the SNFT7 NFT; mainnet correctly
+  shows 0 SOL with disabled buttons) → **Show History** (9 most-recent
+  devnet txs, correct deltas) → **More hub** (all 3 sections + dev/danger
+  badges render in Developer mode) → **Simulation inspector** (fed a real
+  devnet SOL transfer, got `status=ok`, CU=150, System Program, W1
+  −0.001005 / W2 +0.001, both warnings — verified headless via
+  `analyze_transaction` because CanvasKit hides Text in the DOM, playbook
+  §12) → **NFT Gallery** (found `SuperNFT7` on devnet, detail modal with
+  name/symbol/network/mint/attributes + Send NFT).
+- **FIRST REAL MAINNET SWAP** (Jupiter Swap API V2). Used the W1 mainnet
+  wallet `FFde1VgK4kLJanDoBitXw3GAJ3UqWVRA8pd815Pwk5T4` from
+  `mainnet-wallets.txt` (private key `12d8bdf…9188`, mnemonic
+  `undo volcano … crane venue`, derivation `m/44'/501'/0'/0'`,
+  ~0.054 SOL). The wallet was recovered into the running UI via
+  "Recover Wallet" with the private-key hex; the seed-phrase reveal card
+  appeared, then Save persisted it encrypted (`secrets_encrypted: true`,
+  Fernet). Round-trip in two stages:
+  - **SOL → USDC via the UI (Playwright):** W1 mainnet → Show More →
+    tick mainnet → Show Balance → "Swap" (button correctly enabled on
+    the mainnet SOL row). Swap-page built, Amount=0.005, slippage 1.0%
+    (default), Get Quote, Swap. The transaction landed on-chain: balance
+    went 0.054286 SOL + 0.376792 USDC → 0.049259 SOL + 0.751628 USDC
+    (SOL −0.005 / USDC +0.375 ≈ the headless quote of 0.748 USDC). The
+    server logs (`swap.py:198/199` ElevatedButton warnings + balance
+    debug) confirmed `go_to_swap_page_click` built the page end-to-end.
+  - **USDC → SOL headless** (round-trip closure): called
+    `solana.swap.swap(USDC→SOL, 751628 base, slippage_bps=100)` with the
+    W1 private key. Result: `status=confirmed, err=None`, signature
+    **`5AxsSiMh4exNJdJCbLWBG6ji11g6DtvHUgfTErbyH7fKbggp8aR35gkshZQq1XxGHtW7cwvEzoigT3m2TLqFxYRB`**,
+    outAmount 10027022 lamports = **0.010027022 SOL**. Final wallet:
+    0.053961 SOL + 0.374841 USDC (~$4.42). Round-trip cost ≈ $0.025
+    (slippage + 2 tx fees). The `ALLOWED_PROGRAM_IDS` route-safety retry
+    accepted the Jupiter order on the first attempt in both directions.
+- **RECIPE for a real mainnet swap (for future sessions):**
+  1. `mainnet-wallets.txt` has 2 funded mainnet wallets: W1
+     (`FFde1VgK4kLJanDoBitXw3GAJ3UqWVRA8pd815Pwk5T4`, ~0.054 SOL) and W2
+     (`HdNLnrxGJvHEXYYf2YLBv3mNSpxchN2FDs5EGHa115Q3`). Both have SOL +
+     USDC already.
+  2. Headless is faster + more reliable than the UI for a real swap:
+     ```python
+     from solana.swap import swap as jup_swap
+     res = await jup_swap(input_mint, output_mint, amount_base_units,
+                          signer_address, private_key_hex,
+                          slippage_bps=100, network='https://api.mainnet-beta.solana.com')
+     # res['signature'], res['outAmount'], res['confirmation']['result']['value'][0]
+     ```
+     `amount` is in **base units** (lamports for SOL, micro-USDC for USDC),
+     NOT in SOL — `get_quote` will HTTP-400 "amount cannot be parsed" if you
+     pass a float. Use `int(round(sol * 1e9))` / `int(round(usdc * 1e6))`.
+  3. UI swap path: balance screen SOL row → "Swap" → `swap-page`. The
+     handler chain is `on_go_to_swap_page` (in `balance.py`, adapter for
+     `go_to_swap_page_click` in `swap.py`) → builds `get_quote_button_click`
+     + `swap_button_click` as nested closures. Quote is cached in
+     `await_holder` and refuses to swap if inputs changed since quote.
+- **PLAYWRIGHT GOTCHAS confirmed for swap UI testing** (extend playbook):
+  1. **Auto-lock kills long swap tests.** `AUTO_LOCK_SECONDS = 300` (in
+     `ui/app.py`) means after 5 min of no `route_change` the app locks and
+     click handlers silently stop running (no error, just nothing happens).
+     A swap UI test that lingers on the swap-page for >5 min needs
+     `AUTO_LOCK_SECONDS` bumped, OR frequent navigation to reset activity.
+     After a server restart the Python `session` is empty → the app is
+     locked but the PIN dialog may NOT show on a same-tab reload (playbook
+     §7 cache) — open a **new tab** to force `refresh_lock_state` and the
+     unlock dialog.
+  2. **CanvasKit hides quote/success text from the DOM.** The
+     `txt_quote` `flet.Text` and disabled-`TextField` outputs are drawn on
+     the canvas; `document.body.innerText` / `browser_find` return nothing
+     for them (playbook §12). To assert a swap succeeded, either (a) re-fetch
+     the on-chain balance headlessly after the click, or (b) read the
+     `[SWAP] swap result: sig=…` debug print in the background-process
+     server log (`print`-flushed once the handler returns).
+  3. **Server-log freshness via `background_process logs` is laggy** —
+     it returns a snapshot, not a live tail; for a fresh `[SWAP]` line,
+     re-call `background_process logs` AFTER the click + a few seconds
+     wait. The log itself is the single `stdout` pipe of the flet child
+     PID (`ps aux | grep main.py`).
+- **Working tree left clean.** No code change shipped. A temporary
+  `AUTO_LOCK_SECONDS = 3600` override was applied to `ui/app.py` mid-test
+  and reverted to `300` before session end. The recovered "Mainnet W1"
+  wallet record persists in the Playwright-tab `shared_preferences`
+  (browser localStorage) but is NOT in any committed file. The
+  `mainnet-wallets.txt` source of funds is gitignored.
+
+### Session 2026-07-26 (First Android APK build + release signing)
+
+Built and signed the app as a real **Android APK** that installs + runs on a phone
+(no `solana-py`/`solders` — pure reuse of the existing `solana/` + `ui/` layers).
+Committed changes to dependency pins; release keystore + signing workflow are
+gitignored/working-tree. UI/business layer untouched.
+
+- **Build toolchain** (already present on this machine — `flet build apk` finds them
+  automatically; do NOT re-bootstrap):
+  - Flutter **3.41.4** → `/home/oleg/flutter/3.41.4/bin/flutter`
+  - JDK **17.0.13+11** → `/home/oleg/java/17.0.13+11` (flet sets `--jdk-dir` to it)
+  - Android SDK → `/home/oleg/Android/sdk` (cmdline-tools;latest, platform-tools,
+    platforms;android-35, build-tools;34.0.0). `~/.android/sdk` and `ANDROID_HOME`
+  are empty — use `/home/oleg/Android/sdk`, not `~/.android`.
+  - System `java` is JDK **21** — fine for `keytool`, but Gradle uses the JDK 17 above.
+- **How flet packages Python for Android**: `serious_python` (via the
+  `gh:flet-dev/flet-build-template` Flutter bootstrap) downloads a standalone
+  CPython 3.12.9, installs the requirements against an **extra PyPI index
+  `https://pypi.flet.dev`** that hosts pre-built Android wheels, and bundles
+  `app/app.zip`. flet auto-provisions the Android SDK if missing. `flet build apk`
+  reads deps from **`pyproject.toml [project.dependencies]`** (NOT repo-root
+  `requirements.txt`) — that section is now the source of truth.
+- **Dependency version fixes** (committed in this session's working tree —
+  `pyproject.toml` + `requirements.txt`): the pins must match what
+  `pypi.flet.dev` serves for `cp312 android_24_*`:
+  - `pillow==12.2.0` (index has 10.4.0/11.1.0/12.2.0 — **not** 12.3.0 which is
+    PyPI-only and aborts the build with `No matching distribution found`)
+  - `websockets==16.0` (index has 13.0.1/16.0 — **not** 16.1)
+  - `cryptography==43.0.1`, `PyNaCl==1.5.0` — available on the index ✓
+  - pure-Python (`qrcode==8.2`, `httpx`, `mnemonic`, `base58`, `typing_extensions`)
+    resolve from PyPI.
+  - Also **added the missing deps** `qrcode`/`pillow`/`websockets` (were absent from
+    `pyproject.toml [project.dependencies]` — needed for `ui/qr.py` + WalletConnect).
+  - `requires-python` lowered `>=3.13 → >=3.12` (matches the embedded CPython 3.12.9).
+  - **To check available Android versions before bumping a pin:**
+    `curl -s https://pypi.flet.dev/<pkg>/ | grep -oE '<pkg>-[0-9][^.]*'`.
+- **Output**: `build/apk/solana_wallet_v3.apk` (≈87 MB fat APK, all 4 ABIs:
+  arm64-v8a + armeabi-v7a + x86_64 + x86; minSdk 24 / targetSdk 36; package
+  `com.mycompany.solana_wallet_v3`, versionName `0.1.0`, versionCode 1;
+  permissions INTERNET + ACCESS_NETWORK_STATE). For a ~25–30 MB phone APK use
+  `--split-per-abi` and install the **arm64-v8a** build. First build ≈ 17 min
+  (Gradle + Kotlin compile); incremental ≈ 1–2 min.
+- **Play Protect blocked the debug-signed APK** on the user's phone
+  ("App not installed" / "Blocked by Play Protect"). Root cause: the default
+  `flet build apk` signs the release build with the **Android debug certificate**
+  (`CN=Android Debug`) → rejected by Play Protect + some OEM ROMs.
+- **Release signing — use `apksigner`, NOT flet's `--android-signing-*` flags.**
+  flet's built-in signing passes creds to Gradle via env vars and a long-lived
+  Gradle daemon can read a stale password → build fails with
+  `keystore password was incorrect` even though `keytool -list` + `apksigner`
+  open the keystore fine. The reliable workflow is the standard Android one —
+  build (debug-signed) → `zipalign` → `apksigner sign`:
+  ```bash
+  STOREPASS=<password>
+  # keystore created once (gitignored): release.keystore, alias=solana
+  #   creds live in android-signing.txt (also gitignored)
+  keytool -genkeypair -v -keystore release.keystore -alias solana \
+    -keyalg RSA -keysize 2048 -validity 9125 \
+    -storepass "$STOREPASS" -keypass "$STOREPASS" \
+    -dname "CN=Solana Wallet, O=SolanaWallet, C=RU"
+  flet build apk -v
+  BT=/home/oleg/Android/sdk/build-tools/34.0.0
+  "$BT/zipalign" -f -p 4 build/apk/solana_wallet_v3.apk build/apk/aligned.apk
+  "$BT/apksigner" sign --ks release.keystore --ks-key-alias solana \
+    --ks-pass "pass:$STOREPASS" --key-pass "pass:$STOREPASS" \
+    --out build/apk/solana_wallet_v3-release.apk build/apk/aligned.apk
+  "$BT/apksigner" verify --verbose build/apk/solana_wallet_v3-release.apk
+  ```
+  Release APK = `build/apk/solana_wallet_v3-release.apk` (verified v2+v3 schemes,
+  signer `CN=Solana Wallet, OU=App, O=SolanaWallet, L=Moscow, C=RU`).
+  **This release-signed APK installed successfully on the user's phone.**
+- **Keystore secret hygiene**: `release.keystore` + `android-signing.txt` added to
+  `.gitignore` and confirmed `git check-ignore`'d. Never commit. If the keystore
+  is lost, a new one means a new signature → can't update the same package id
+  (users must uninstall+reinstall).
+- **Install / Play Protect bypass** (for end users): if Play Protect still blocks
+  a release build, disable "Scan apps with Play Protect"
+  (Play Store → profile → Play Protect → gear) for the install, or tap
+  "More details → Install anyway". A release-signed APK is blocked far less often
+  than a debug-signed one.
+- **README** rewritten this session to match the current feature set + document the
+  `apksigner` release workflow + Play Protect note. Old `.apk` Google-Drive link
+  left with a "older build" caveat.
+- **Working tree (uncommitted)**: `pyproject.toml`, `requirements.txt`, `README.md`,
+  `.gitignore` (+ this AGENTS.md entry). `release.keystore` / `android-signing.txt`
+  are gitignored. **Not committed** — the user has not requested a commit.
+
 ## Security reminders
 
 - Private keys and mnemonics are stored **encrypted at rest** (Fernet) once a PIN is set;
