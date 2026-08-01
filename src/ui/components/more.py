@@ -88,16 +88,12 @@ async def clear_storage_click(ctx: AppContext, e) -> None:
     """
     page = ctx.page
     dlg = flet.AlertDialog(
-        title=flet.Text("Clear ALL local storage?"),
-        content=flet.Text(
-            "This permanently deletes every wallet, the PIN, contacts and "
-            "WalletConnect pairing. Encrypted secrets cannot be recovered.",
-            size=12,
-        ),
+        title=flet.Text(ctx.t("clear_all_storage_q")),
+        content=flet.Text(ctx.t("clear_all_storage_desc"), size=12),
         actions=[
-            flet.TextButton("Cancel", on_click=lambda ev: ctx.close_dialog(dlg)),
+            flet.TextButton(ctx.t("cancel"), on_click=lambda ev: ctx.close_dialog(dlg)),
             flet.TextButton(
-                "Clear everything",
+                ctx.t("clear_everything"),
                 style=flet.ButtonStyle(color=flet.Colors.RED),
                 on_click=lambda ev: asyncio.create_task(_do_clear_storage(ctx, dlg)),
             ),
@@ -111,7 +107,7 @@ async def _do_clear_storage(ctx: AppContext, dlg) -> None:
     page = ctx.page
     ctx.close_dialog(dlg)
     await clear_client_storage(ctx)
-    page.show_dialog(flet.AlertDialog(title=flet.Text("All local storage cleared.")))
+    page.show_dialog(flet.AlertDialog(title=flet.Text(ctx.t("storage_cleared"))))
     await page.push_route("/")
 
 
@@ -126,7 +122,7 @@ def build_more_page(ctx: AppContext) -> flet.View:
     more_page = flet.View(
         route="more-page",
         appbar=flet.AppBar(
-            title=flet.Text("More"),
+            title=flet.Text(ctx.t("more")),
             color="white",
             bgcolor="#1da1f2",
             leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=ctx.controls["view_pop"]),
@@ -173,43 +169,43 @@ async def more_enter(ctx: AppContext) -> None:
     if feature("walletconnect", mode):
         web3_items.append(
             _hub_item(
-                flet.Icons.LINK, "Connect dApp",
-                "Pair with a dApp via WalletConnect v2 and sign requests.", nav_wc,
+                flet.Icons.LINK, ctx.t("hub_connect_dapp"),
+                ctx.t("hub_connect_dapp_desc"), nav_wc,
             )
         )
     if feature("nft", mode):
         web3_items.append(
             _hub_item(
-                flet.Icons.COLLECTIONS, "NFT Gallery",
-                "Browse and send your non-fungible tokens.", nav_nft,
+                flet.Icons.COLLECTIONS, ctx.t("hub_nft"),
+                ctx.t("hub_nft_desc"), nav_nft,
             )
         )
     if feature("staking", mode):
         web3_items.append(
             _hub_item(
-                flet.Icons.SAVINGS, "Liquid Staking",
-                "Stake SOL into JitoSOL / mSOL / bSOL / jupSOL.", nav_stake,
+                flet.Icons.SAVINGS, ctx.t("hub_staking"),
+                ctx.t("hub_staking_desc"), nav_stake,
             )
         )
     if web3_items:
         controls.append(
-            flet.Text("WEB3 & DeFi", size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600)
+            flet.Text(ctx.t("web3_defi"), size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600)
         )
         controls.extend(web3_items)
         controls.append(flet.Divider())
 
     # Tools — always visible in every mode.
-    controls.append(flet.Text("Tools", size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600))
+    controls.append(flet.Text(ctx.t("tools"), size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600))
     controls.append(
         _hub_item(
-            flet.Icons.CONTACTS, "Address Book",
-            "Saved recipients with address-poisoning protection.", nav_addressbook,
+            flet.Icons.CONTACTS, ctx.t("hub_address_book"),
+            ctx.t("hub_address_book_desc"), nav_addressbook,
         )
     )
     controls.append(
         _hub_item(
-            flet.Icons.SETTINGS, "Settings",
-            "Theme, security and app preferences.", nav_settings,
+            flet.Icons.SETTINGS, ctx.t("settings"),
+            ctx.t("hub_settings_desc"), nav_settings,
         )
     )
 
@@ -219,43 +215,43 @@ async def more_enter(ctx: AppContext) -> None:
     if feature("devtools", mode):
         dev_items.append(
             _hub_item(
-                flet.Icons.STORAGE, "Storage inspector",
-                "View and edit raw shared_preferences keys.", nav_dev_storage, badge="dev",
+                flet.Icons.STORAGE, ctx.t("hub_storage_inspector"),
+                ctx.t("hub_storage_inspector_desc"), nav_dev_storage, badge="dev",
             )
         )
     if feature("sim_detail", mode):
         dev_items.append(
             _hub_item(
-                flet.Icons.BIOTECH, "Simulation inspector",
-                "Run the anti-phishing simulation on a pasted transaction.", nav_sim, badge="dev",
+                flet.Icons.BIOTECH, ctx.t("hub_sim_inspector"),
+                ctx.t("hub_sim_inspector_desc"), nav_sim, badge="dev",
             )
         )
     if feature("custom_rpc", mode):
         dev_items.append(
             _hub_item(
-                flet.Icons.DVR, "Raw RPC inspector",
-                "Run read-only JSON-RPC calls against any endpoint.", nav_rpc, badge="dev",
+                flet.Icons.DVR, ctx.t("hub_rpc_inspector"),
+                ctx.t("hub_rpc_inspector_desc"), nav_rpc, badge="dev",
             )
         )
     if feature("raw_export", mode):
         dev_items.append(
             _hub_item(
-                flet.Icons.VPN_KEY, "Export raw keys",
-                "Reveal & copy a wallet's private key / mnemonic. DANGEROUS.",
-                nav_rawkey, badge="danger",
+                flet.Icons.VPN_KEY, ctx.t("hub_export_keys"),
+                ctx.t("hub_export_keys_desc"),
+                nav_rawkey, badge=ctx.t("badge_danger"),
             )
         )
     if feature("devtools", mode):
         dev_items.append(
             _hub_item(
-                flet.Icons.DELETE_SWEEP_OUTLINED, "Clear all storage",
-                "Wipe every wallet, PIN and pairing. Irreversible.", _clear_storage, badge="danger",
+                flet.Icons.DELETE_SWEEP_OUTLINED, ctx.t("hub_clear_storage"),
+                ctx.t("hub_clear_storage_desc"), _clear_storage, badge=ctx.t("badge_danger"),
             )
         )
     if dev_items:
         controls.append(flet.Divider())
         controls.append(
-            flet.Text("Developer", size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600)
+            flet.Text(ctx.t("developer"), size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_600)
         )
         controls.extend(dev_items)
 

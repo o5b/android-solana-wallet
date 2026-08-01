@@ -88,7 +88,6 @@ async def build_app(page: flet.Page) -> None:
     every prior group relied on.
     """
     page.scroll = flet.ScrollMode.AUTO
-    page.title = "Solana Wallet"
     page.vertical_alignment = flet.MainAxisAlignment.CENTER
     page.horizontal_alignment = flet.CrossAxisAlignment.CENTER
     csv_file_picker = flet.FilePicker()
@@ -130,6 +129,9 @@ async def build_app(page: flet.Page) -> None:
     # dropdown's on_select. Every ctx.t(...) call reads this field, so a
     # language switch never needs to thread ``page`` through call sites.
     ctx.lang = await get_lang(page)
+    # Window/tab title (localized). Set after the language cache is read so it
+    # matches the persisted language; every other string uses ``ctx.t``.
+    page.title = ctx.t("app_title")
     # The CSV file picker is used by the Developer-mode "Save History as CSV"
     # button (history handler in ui/components/balance.py). It must be appended
     # to ``page.services`` (above) for the picker to actually render; exposed
@@ -177,27 +179,27 @@ async def build_app(page: flet.Page) -> None:
         on_change=selected_navbar,
         destinations=[
             flet.NavigationBarDestination(
-                label="Home",
+                label=ctx.t("nav_home"),
                 icon=flet.Icon(flet.Icons.HOME_OUTLINED),
                 selected_icon=flet.Icon(flet.Icons.HOME),
             ),
             flet.NavigationBarDestination(
-                label="New",
+                label=ctx.t("nav_new"),
                 icon=flet.Icon(flet.Icons.ADD_OUTLINED),
                 selected_icon=flet.Icon(flet.Icons.ADD),
             ),
             flet.NavigationBarDestination(
-                label="Recover",
+                label=ctx.t("nav_recover"),
                 icon=flet.Icon(flet.Icons.ROCKET_LAUNCH_OUTLINED),
                 selected_icon=flet.Icon(flet.Icons.ROCKET_LAUNCH),
             ),
             flet.NavigationBarDestination(
-                label="Add",
+                label=ctx.t("nav_add"),
                 icon=flet.Icon(flet.Icons.LINK_OUTLINED),
                 selected_icon=flet.Icon(flet.Icons.LINK),
             ),
             flet.NavigationBarDestination(
-                label="More",
+                label=ctx.t("more"),
                 icon=flet.Icon(flet.Icons.APPS_OUTLINED),
                 selected_icon=flet.Icon(flet.Icons.APPS),
             ),
@@ -227,10 +229,10 @@ async def build_app(page: flet.Page) -> None:
     recover_wallet_button = flet.OutlinedButton(
         height=100,
         width=100,
-        content=flet.Container(
-            width=200,
-            content=flet.Column(controls=[flet.Image(src="recover.png"), flet.Text('Recover Wallet', size=12)])
-        ),
+            content=flet.Container(
+                width=200,
+                content=flet.Column(controls=[flet.Image(src="recover.png"), flet.Text(ctx.t("recover_wallet"), size=12)])
+            ),
         style=flet.ButtonStyle(shape=flet.RoundedRectangleBorder(radius=10)),
         on_click=nav_recover,
     )
@@ -239,10 +241,10 @@ async def build_app(page: flet.Page) -> None:
     add_wallet_address_button = flet.OutlinedButton(
         height=100,
         width=100,
-        content=flet.Container(
-            width=200,
-            content=flet.Column(controls=[flet.Image(src="add.png"), flet.Text('Add Wallet Address', size=12)])
-        ),
+            content=flet.Container(
+                width=200,
+                content=flet.Column(controls=[flet.Image(src="add.png"), flet.Text(ctx.t("add_wallet_address"), size=12)])
+            ),
         style=flet.ButtonStyle(shape=flet.RoundedRectangleBorder(radius=10)),
         on_click=nav_add,
     )
@@ -251,10 +253,10 @@ async def build_app(page: flet.Page) -> None:
     create_wallet_button = flet.OutlinedButton(
         height=100,
         width=100,
-        content=flet.Container(
-            width=200,
-            content=flet.Column(controls=[flet.Image(src="create.png"), flet.Text('New Wallet')])
-        ),
+            content=flet.Container(
+                width=200,
+                content=flet.Column(controls=[flet.Image(src="create.png"), flet.Text(ctx.t("new_wallet"))])
+            ),
         style=flet.ButtonStyle(shape=flet.RoundedRectangleBorder(radius=10)),
         on_click=nav_create,
     )
@@ -274,9 +276,9 @@ async def build_app(page: flet.Page) -> None:
         appbar=flet.AppBar(
             bgcolor="#1da1f2",
             color="white",
-            title=flet.Text("Solana Wallet"),
+            title=flet.Text(ctx.t("app_title")),
             actions=[
-                flet.IconButton(icon=flet.Icons.APPS, tooltip="More", on_click=nav_more),
+                flet.IconButton(icon=flet.Icons.APPS, tooltip=ctx.t("more"), on_click=nav_more),
             ],
         ),
         navigation_bar=navbar,
@@ -285,7 +287,7 @@ async def build_app(page: flet.Page) -> None:
         controls=[
             flet.Text('Solana', size=30, font_family="Georgia", weight=flet.FontWeight.BOLD),
             button_group_1,
-            flet.Text('Wallets:', size=30, font_family="Georgia", weight=flet.FontWeight.BOLD),
+            flet.Text(ctx.t("wallets_label"), size=30, font_family="Georgia", weight=flet.FontWeight.BOLD),
             await get_wallets_cards(ctx),
         ],
     )

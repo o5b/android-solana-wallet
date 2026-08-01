@@ -183,7 +183,7 @@ async def get_wallets_cards(ctx: AppContext) -> flet.ListView:
                     content=flet.Column(
                         [
                             flet.Text(
-                                "Wallet Name: ",
+                                ctx.t("wallet_name_label"),
                                 size=16,
                                 font_family="Georgia",
                                 text_align=flet.TextAlign.RIGHT,
@@ -195,7 +195,7 @@ async def get_wallets_cards(ctx: AppContext) -> flet.ListView:
                                 ],
                             ),
                             flet.Text(
-                                "Wallet Description: ",
+                                ctx.t("wallet_desc_label"),
                                 size=16,
                                 font_family="Georgia",
                                 text_align=flet.TextAlign.RIGHT,
@@ -207,7 +207,7 @@ async def get_wallets_cards(ctx: AppContext) -> flet.ListView:
                                 ],
                             ),
                             flet.Text(
-                                "Address: ",
+                                ctx.t("address_label"),
                                 size=16,
                                 font_family="Georgia",
                                 selectable=True,
@@ -219,7 +219,7 @@ async def get_wallets_cards(ctx: AppContext) -> flet.ListView:
                                 ],
                             ),
                             flet.Text(
-                                "Watch-only (no private key)",
+                                ctx.t("watch_only_badge"),
                                 size=11, color="orange", weight=flet.FontWeight.BOLD,
                                 visible=bool(wallet.get(WATCH_ONLY_FIELD)),
                             ),
@@ -227,7 +227,7 @@ async def get_wallets_cards(ctx: AppContext) -> flet.ListView:
                             flet.Row(
                                 [
                                     flet.ElevatedButton(
-                                        content=flet.Text("Show More"),
+                                        content=flet.Text(ctx.t("show_more")),
                                         on_click=_go_to_address_page,
                                         data=wallet,
                                     ),
@@ -252,7 +252,7 @@ async def delete_wallet_click(ctx: AppContext, e):
     wallet = e.control.data
     if "storage_key" in wallet:
         await page.shared_preferences.remove(wallet["storage_key"])
-        page.show_dialog(flet.AlertDialog(title=flet.Text("Wallet deleted successfully!")))
+        page.show_dialog(flet.AlertDialog(title=flet.Text(ctx.t("wallet_deleted_ok"))))
         await page.push_route("/")
 
 
@@ -279,23 +279,23 @@ async def wallet_info_click(ctx: AppContext, e):
         copy_val = {k: v for k, v in copy_src.items() if k != "storage_key"}
         await page.clipboard.set(json.dumps(copy_val, indent=2))
 
-    tf_name = flet.TextField(label="Name", value=wallet.get("name", ""))
-    tf_desc = flet.TextField(label="Description", value=wallet.get("description", ""), multiline=True)
+    tf_name = flet.TextField(label=ctx.t("field_name"), value=wallet.get("name", ""))
+    tf_desc = flet.TextField(label=ctx.t("field_description"), value=wallet.get("description", ""), multiline=True)
 
     # Decrypt secrets on demand (records are stored encrypted once a PIN exists).
     w_dec = ctx.decrypt_for_display(wallet)
-    watch_only_tag = "  (watch-only)" if wallet.get(WATCH_ONLY_FIELD) else ""
-    info_text = (
-        f"Address: {wallet.get('address_base58')}\n"
-        f"Created: {wallet.get('created')}{watch_only_tag}\n"
-        f"Private Key: {w_dec.get('private_key_hex')}\n"
-        f"Public Key: {w_dec.get('public_key_hex')}\n"
-        f"Words: {w_dec.get('words')}\n"
-        f"Secret Key (base58): {w_dec.get('secret_key_base58')}"
-    )
+    watch_only_tag = ctx.t("watch_only_tag") if wallet.get(WATCH_ONLY_FIELD) else ""
+    info_text = "\n".join([
+        ctx.t("info_address", val=wallet.get('address_base58')),
+        ctx.t("info_created", val=wallet.get('created')) + watch_only_tag,
+        ctx.t("info_private_key", val=w_dec.get('private_key_hex')),
+        ctx.t("info_public_key", val=w_dec.get('public_key_hex')),
+        ctx.t("info_words", val=w_dec.get('words')),
+        ctx.t("info_secret_key", val=w_dec.get('secret_key_base58')),
+    ])
 
     dlg_info = flet.AlertDialog(
-        title=flet.Text("Wallet Info"),
+        title=flet.Text(ctx.t("wallet_info")),
         content=flet.Column(
             [
                 tf_name,
@@ -315,14 +315,14 @@ async def wallet_info_click(ctx: AppContext, e):
                     alignment=flet.MainAxisAlignment.CENTER,
                 ),
                 flet.Text(info_text, selectable=True, size=12),
-                flet.ElevatedButton("Copy All Data", on_click=copy_data, icon=flet.Icons.COPY),
+                flet.ElevatedButton(ctx.t("copy_all_data"), on_click=copy_data, icon=flet.Icons.COPY),
             ],
             scroll=flet.ScrollMode.AUTO,
             height=400,
         ),
         actions=[
-            flet.TextButton("Save", on_click=save_info),
-            flet.TextButton("Cancel", on_click=close_dlg),
+            flet.TextButton(ctx.t("save"), on_click=save_info),
+            flet.TextButton(ctx.t("cancel"), on_click=close_dlg),
         ],
         actions_alignment=flet.MainAxisAlignment.END,
     )
@@ -340,7 +340,7 @@ async def show_qr_click(ctx: AppContext, e):
 
     qr_b64 = await asyncio.to_thread(generate_qr_base64, address)
     dlg_qr = flet.AlertDialog(
-        title=flet.Text("Receive SOL", text_align=flet.TextAlign.CENTER),
+        title=flet.Text(ctx.t("receive_sol"), text_align=flet.TextAlign.CENTER),
         content=flet.Column(
             [
                 flet.Image(src=qr_b64, width=280, height=280, fit=flet.BoxFit.CONTAIN),
@@ -349,7 +349,7 @@ async def show_qr_click(ctx: AppContext, e):
             horizontal_alignment=flet.CrossAxisAlignment.CENTER,
             tight=True,
         ),
-        actions=[flet.TextButton("Close", on_click=close_qr_dlg)],
+        actions=[flet.TextButton(ctx.t("close"), on_click=close_qr_dlg)],
         actions_alignment=flet.MainAxisAlignment.CENTER,
     )
     page.show_dialog(dlg_qr)
@@ -391,9 +391,9 @@ async def go_to_address_page(ctx: AppContext, e):
     el_address_page.controls = [
         flet.Row(
             [
-                flet.IconButton(icon=flet.Icons.INFO, tooltip="Wallet Info", on_click=_wallet_info, data=wallet),
+                flet.IconButton(icon=flet.Icons.INFO, tooltip=ctx.t("wallet_info"), on_click=_wallet_info, data=wallet),
                 flet.IconButton(
-                    icon=flet.Icons.DELETE, tooltip="Delete Wallet",
+                    icon=flet.Icons.DELETE, tooltip=ctx.t("delete_wallet"),
                     on_click=_delete_wallet, data=wallet, icon_color="red",
                 ),
             ],
@@ -402,7 +402,7 @@ async def go_to_address_page(ctx: AppContext, e):
         flet.Row(
             [
                 flet.Text(
-                    "Wallet Name: ",
+                    ctx.t("wallet_name_label"),
                     size=16, font_family="Georgia", text_align=flet.TextAlign.RIGHT,
                     spans=[
                         flet.TextSpan(
@@ -416,7 +416,7 @@ async def go_to_address_page(ctx: AppContext, e):
         flet.Row(
             [
                 flet.Text(
-                    "Wallet Description: ",
+                    ctx.t("wallet_desc_label"),
                     size=16, font_family="Georgia", text_align=flet.TextAlign.RIGHT,
                     spans=[
                         flet.TextSpan(
@@ -435,7 +435,7 @@ async def go_to_address_page(ctx: AppContext, e):
                     selectable=True,
                     text_align=flet.TextAlign.RIGHT,
                     spans=[
-                        flet.TextSpan("Created: ", flet.TextStyle(size=16)),
+                        flet.TextSpan(ctx.t("created_label"), flet.TextStyle(size=16)),
                         flet.TextSpan(
                             f'{wallet["created"]}',
                             flet.TextStyle(size=12, weight=flet.FontWeight.BOLD),
@@ -447,7 +447,7 @@ async def go_to_address_page(ctx: AppContext, e):
         flet.Row(
             [
                 flet.Text(
-                    "Address: ",
+                    ctx.t("address_label"),
                     size=16, text_align=flet.TextAlign.RIGHT, font_family="Georgia",
                 ),
             ]
@@ -473,28 +473,28 @@ async def go_to_address_page(ctx: AppContext, e):
         flet.Row(
             [
                 flet.ElevatedButton(
-                    content=flet.Text("Show QR Code"),
+                    content=flet.Text(ctx.t("show_qr_code")),
                     icon=flet.Icons.QR_CODE_2,
                     on_click=_show_qr,
                     data=wallet["address_base58"],
                 ),
                 flet.IconButton(
                     icon=flet.Icons.CONTENT_COPY,
-                    tooltip="Copy Address",
+                    tooltip=ctx.t("copy_address"),
                     on_click=_copy_address,
                 ),
             ],
             alignment=flet.MainAxisAlignment.CENTER,
         ),
         flet.Divider(thickness=2),
-        flet.Row([flet.Text("Solana Networks:", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD)]),
+        flet.Row([flet.Text(ctx.t("solana_networks"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD)]),
         flet.Row(
             [
                 flet.Column(
                     [
-                        flet.Checkbox(label="mainnet-beta (real network)", value=True),
-                        flet.Checkbox(label="testnet (not a real network)", value=False),
-                        flet.Checkbox(label="devnet (not a real network)", value=False),
+                        flet.Checkbox(label=ctx.t("net_mainnet_beta"), value=True),
+                        flet.Checkbox(label=ctx.t("net_testnet"), value=False),
+                        flet.Checkbox(label=ctx.t("net_devnet"), value=False),
                     ]
                 ),
             ],
@@ -503,12 +503,12 @@ async def go_to_address_page(ctx: AppContext, e):
         flet.Row(
             [
                 flet.ElevatedButton(
-                    content=flet.Text("Show History"),
+                    content=flet.Text(ctx.t("show_history")),
                     on_click=_show_history,
                     data=wallet,
                 ),
                 flet.ElevatedButton(
-                    content=flet.Text("Show Balance"),
+                    content=flet.Text(ctx.t("show_balance")),
                     on_click=_show_balance,
                     data=wallet,
                 ),
@@ -543,7 +543,7 @@ async def get_history_button_click(ctx: AppContext, e):
 
         e.control.disabled = True   # блокируем кнопку
         el_token_balance_data.controls.append(
-            flet.Row([flet.ProgressRing(), flet.Text("LOADING HISTORY...")], alignment=flet.MainAxisAlignment.CENTER)
+            flet.Row([flet.ProgressRing(), flet.Text(ctx.t("loading_history"))], alignment=flet.MainAxisAlignment.CENTER)
         )
         page.update()
 
@@ -561,21 +561,21 @@ async def get_history_button_click(ctx: AppContext, e):
 
         for net_name, net_url in networks:
             tmp_history_result.append(
-                flet.Row([flet.Text(f"Network: {net_name}", size=16, weight=flet.FontWeight.BOLD)])
+                flet.Row([flet.Text(ctx.t("network_label", net=net_name), size=16, weight=flet.FontWeight.BOLD)])
             )
 
             # Запрашиваем историю
             history_data = await get_transaction_history(wallet["address_base58"], net_url)
 
             if "error" in history_data:
-                tmp_history_result.append(flet.Text(f"Error: {history_data['error']}", color="red"))
+                tmp_history_result.append(flet.Text(ctx.t("error_prefix", err=history_data['error']), color="red"))
             elif "result" in history_data and history_data["result"]:
                 csv_history.append((net_name, history_data["result"]))
                 for tx in history_data["result"]:
                     time_str = (
                         datetime.fromtimestamp(tx["block_time"]).strftime("%Y-%m-%d %H:%M:%S")
                         if tx["block_time"]
-                        else "Unknown"
+                        else ctx.t("unknown")
                     )
 
                     sol_change = tx.get("sol_change", 0)
@@ -618,9 +618,12 @@ async def get_history_button_click(ctx: AppContext, e):
                         # Progressive disclosure: Simple = header only;
                         # Pro = + expandable Signature/Status/Fee;
                         # Developer = + Slot/Version/CU + logs.
+                        _status_word = ctx.t(
+                            "status_success" if tx_data["success"] else "status_failed"
+                        )
                         header_lines = [
                             flet.Text(
-                                f"{t_str} • {tx_data.get('tx_type', 'Unknown')}",
+                                f"{t_str} • {tx_data.get('tx_type') or ctx.t('unknown')}",
                                 size=12, weight=flet.FontWeight.BOLD, color="grey700",
                             ),
                             flet.Text(spans=b_spans),
@@ -630,7 +633,7 @@ async def get_history_button_click(ctx: AppContext, e):
                         if not show_detail:
                             header_lines.append(
                                 flet.Text(
-                                    f"{'Success' if tx_data['success'] else 'Failed'}",
+                                    _status_word,
                                     size=11,
                                     color="green" if tx_data["success"] else "red",
                                 )
@@ -646,17 +649,20 @@ async def get_history_button_click(ctx: AppContext, e):
 
                         details_inner = [
                             flet.Divider(thickness=1),
-                            flet.Text(f"Signature: {tx_data['signature']}", selectable=True, size=12, italic=True),
+                            flet.Text(ctx.t("signature_label", sig=tx_data['signature']), selectable=True, size=12, italic=True),
                             flet.Text(
-                                f"Status: {'Success' if tx_data['success'] else 'Failed'} | "
-                                f"Fee: {tx_data.get('fee', 0):.9f} SOL",
+                                ctx.t(
+                                    "history_status_fee",
+                                    status=_status_word,
+                                    fee=f"{tx_data.get('fee', 0):.9f}",
+                                ),
                                 size=12,
                                 color="green" if tx_data["success"] else "red",
                             ),
                         ]
                         if show_tech:
                             # Формируем логи в виде прокручиваемого списка
-                            logs_controls = [flet.Text("Logs:", size=12, weight=flet.FontWeight.BOLD)]
+                            logs_controls = [flet.Text(ctx.t("logs_label"), size=12, weight=flet.FontWeight.BOLD)]
                             if tx_data.get("logs"):
                                 for log in tx_data["logs"]:
                                     # Подсвечиваем ошибки красным для удобства
@@ -669,7 +675,7 @@ async def get_history_button_click(ctx: AppContext, e):
                                         flet.Text(f"• {log}", size=10, color=log_color, selectable=True)
                                     )
                             else:
-                                logs_controls.append(flet.Text("No logs available", size=10, color="grey"))
+                                logs_controls.append(flet.Text(ctx.t("no_logs"), size=10, color="grey"))
 
                             # Оборачиваем логи в Column с фиксированной высотой и скроллом
                             logs_column = flet.Container(
@@ -681,8 +687,12 @@ async def get_history_button_click(ctx: AppContext, e):
                             )
                             details_inner.append(
                                 flet.Text(
-                                    f"Slot: {tx_data.get('slot')} | Version: {tx_data.get('version')} | "
-                                    f"CU Consumed: {tx_data.get('compute_units')}",
+                                    ctx.t(
+                                        "slot_version_cu",
+                                        slot=tx_data.get('slot'),
+                                        version=tx_data.get('version'),
+                                        cu=tx_data.get('compute_units'),
+                                    ),
                                     size=12, color="blue",
                                 )
                             )
@@ -727,7 +737,7 @@ async def get_history_button_click(ctx: AppContext, e):
                     tmp_history_result.append(create_tx_card(tx, time_str, balance_spans))
 
             else:
-                tmp_history_result.append(flet.Text("No transactions found.", italic=True))
+                tmp_history_result.append(flet.Text(ctx.t("no_transactions"), italic=True))
 
             tmp_history_result.append(flet.Divider(thickness=1))
 
@@ -737,7 +747,7 @@ async def get_history_button_click(ctx: AppContext, e):
             async def export_history_csv_click(_):
                 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                 saved_path = await csv_file_picker.save_file(
-                    dialog_title="Save transaction history CSV",
+                    dialog_title=ctx.t("save_history_csv_title"),
                     file_name=f"solana-history-{timestamp}.csv",
                     file_type=flet.FilePickerFileType.CUSTOM,
                     allowed_extensions=["csv"],
@@ -746,8 +756,8 @@ async def get_history_button_click(ctx: AppContext, e):
                 if saved_path:
                     page.show_dialog(
                         flet.AlertDialog(
-                            title=flet.Text("CSV saved"),
-                            content=flet.Text(f"Transaction history saved to:\n{saved_path}"),
+                            title=flet.Text(ctx.t("csv_saved")),
+                            content=flet.Text(ctx.t("csv_saved_to", path=saved_path)),
                         )
                     )
 
@@ -756,7 +766,7 @@ async def get_history_button_click(ctx: AppContext, e):
                 flet.Row(
                     [
                         flet.ElevatedButton(
-                            content=flet.Text("Save History as CSV"),
+                            content=flet.Text(ctx.t("save_history_csv")),
                             icon=flet.Icons.DOWNLOAD,
                             on_click=export_history_csv_click,
                         ),
@@ -771,7 +781,7 @@ async def get_history_button_click(ctx: AppContext, e):
 
     except Exception as er:
         print(f"Error get_history_button_click: {er}")
-        page.show_dialog(flet.AlertDialog(title=flet.Text("Error loading history!")))
+        page.show_dialog(flet.AlertDialog(title=flet.Text(ctx.t("err_loading_history"))))
         e.control.disabled = False
     finally:
         page.update()
@@ -823,7 +833,7 @@ async def get_balance_button_click(ctx: AppContext, e):
         print(f"networks: {networks}")
         e.control.disabled = True   # блокируем кнопку
         el_token_balance_data.controls.append(
-            flet.Row([flet.ProgressRing(), flet.Text("PLEASE WAIT")], alignment=flet.MainAxisAlignment.CENTER)
+            flet.Row([flet.ProgressRing(), flet.Text(ctx.t("please_wait"))], alignment=flet.MainAxisAlignment.CENTER)
         )
         page.update()
         tmp_balance_result = []
@@ -914,7 +924,7 @@ async def get_balance_button_click(ctx: AppContext, e):
                     flet.Row(
                         [
                             flet.ElevatedButton(
-                                content=flet.Text("Transfer this token"),
+                                content=flet.Text(ctx.t("transfer_this_token")),
                                 on_click=on_go_to_spl_token_page,
                                 data={
                                     "wallet_address": wallet["address_base58"],
@@ -985,7 +995,7 @@ async def get_balance_button_click(ctx: AppContext, e):
                     # badged with the detection reasons so the user is warned.
                     if is_suspicious(spl_token):
                         _sv = spl_token.get("spam") or {}
-                        _reasons = ", ".join(_sv.get("reasons") or []) or "flagged as risky"
+                        _reasons = ", ".join(_sv.get("reasons") or []) or ctx.t("flagged_risky")
                         tmp_balance_spl.append(
                             flet.Row(
                                 [
@@ -994,7 +1004,7 @@ async def get_balance_button_click(ctx: AppContext, e):
                                         color=flet.Colors.ORANGE, size=18,
                                     ),
                                     flet.Text(
-                                        f"Suspicious: {_reasons}",
+                                        ctx.t("suspicious_label", reasons=_reasons),
                                         size=12, color=flet.Colors.ORANGE_800, selectable=True,
                                     ),
                                 ],
@@ -1022,7 +1032,7 @@ async def get_balance_button_click(ctx: AppContext, e):
                                     [
                                         flet.Icon(flet.Icons.WARNING, color=flet.Colors.RED, size=18),
                                         flet.Text(
-                                            f"{spam_token_count} spam token(s) hidden — click to show",
+                                            ctx.tp("spam_hidden_click_pl", "spam_hidden_click_sg", spam_token_count),
                                             size=12, color=flet.Colors.RED,
                                         ),
                                     ],
@@ -1042,7 +1052,7 @@ async def get_balance_button_click(ctx: AppContext, e):
             ):
                 tmp_request_airdrop.append(
                     flet.ElevatedButton(
-                        content=flet.Text("Request Airdrop 1 SOL"),
+                        content=flet.Text(ctx.t("request_airdrop_1")),
                         on_click=on_request_airdrop,
                         data={
                             "wallet_address": wallet["address_base58"],
@@ -1082,7 +1092,7 @@ async def get_balance_button_click(ctx: AppContext, e):
                                 value="",
                                 spans=[
                                     flet.TextSpan(
-                                        f"Network: {r['network']}",
+                                        ctx.t("network_label", net=r['network']),
                                         flet.TextStyle(size=16, weight=flet.FontWeight.BOLD),
                                     )
                                 ],
@@ -1092,7 +1102,7 @@ async def get_balance_button_click(ctx: AppContext, e):
                     flet.Row(
                         [
                             flet.ElevatedButton(
-                                content=flet.Text("Transfer this token"),
+                                content=flet.Text(ctx.t("transfer_this_token")),
                                 on_click=on_go_to_token_page,
                                 data={
                                     "wallet_address": wallet["address_base58"],
@@ -1104,7 +1114,7 @@ async def get_balance_button_click(ctx: AppContext, e):
                                 disabled=False if r["sol"] else True,
                             ),
                             flet.ElevatedButton(
-                                content=flet.Text("Swap"),
+                                content=flet.Text(ctx.t("swap_btn")),
                                 on_click=on_go_to_swap_page,
                                 data={
                                     "wallet_address": wallet["address_base58"],
@@ -1146,7 +1156,7 @@ async def get_balance_button_click(ctx: AppContext, e):
         else:
             _priced = price_info.get("priced", 0)
             _tokens = price_info.get("tokens", 0)
-            _note = "" if _priced or not _tokens else " (no priced tokens)"
+            _note = "" if _priced or not _tokens else ctx.t("no_priced_tokens")
         if price_info.get("mainnet") and _banner_total:
             _balance_controls.append(
                 flet.Container(
@@ -1156,7 +1166,7 @@ async def get_balance_button_click(ctx: AppContext, e):
                                 value="",
                                 spans=[
                                     flet.TextSpan(
-                                        "Portfolio value  ",
+                                        ctx.t("portfolio_value"),
                                         flet.TextStyle(size=14, color=flet.Colors.GREY_700),
                                     ),
                                     flet.TextSpan(
@@ -1183,16 +1193,16 @@ async def get_balance_button_click(ctx: AppContext, e):
         if spam_info.get("flagged"):
             _spam_txt = []
             if spam_info.get("spam"):
-                _spam_txt.append(f"{spam_info['spam']} spam hidden")
+                _spam_txt.append(ctx.tp("spam_count_pl", "spam_count_sg", spam_info['spam']))
             if spam_info.get("suspicious"):
-                _spam_txt.append(f"{spam_info['suspicious']} suspicious")
+                _spam_txt.append(ctx.tp("suspicious_count_pl", "suspicious_count_sg", spam_info['suspicious']))
             _balance_controls.append(
                 flet.Container(
                     content=flet.Row(
                         [
                             flet.Icon(flet.Icons.SHIELD_OUTLINED, color=flet.Colors.RED_700, size=18),
                             flet.Text(
-                                f"Spam filter: {' / '.join(_spam_txt)}",
+                                ctx.t("spam_filter_summary", summary=" / ".join(_spam_txt)),
                                 size=12, color=flet.Colors.RED_700, selectable=True,
                             ),
                         ],
@@ -1209,21 +1219,21 @@ async def get_balance_button_click(ctx: AppContext, e):
         print(f"time: {datetime.now() - start} sec")
         page.show_dialog(
             flet.AlertDialog(
-                title=flet.Text(f"Balance for {wallet['address_base58']} received successfully!"),
+                title=flet.Text(ctx.t("balance_received_ok", addr=wallet['address_base58'])),
             )
         )
     except Exception as er:
         print(f"Error get_balance_button_click: {er}")
         el_token_balance_data.controls.clear()
         el_token_balance_data.controls.append(
-            flet.Text(f"Error: {er}", color=flet.Colors.RED, size=14)
+            flet.Text(ctx.t("error_prefix", err=er), color=flet.Colors.RED, size=14)
         )
         try:
             e.control.disabled = False
         except Exception:
             pass
         page.show_dialog(
-            flet.AlertDialog(title=flet.Text("Error get_balance_button_click!")),
+            flet.AlertDialog(title=flet.Text(ctx.t("err_balance"))),
         )
     finally:
         try:
@@ -1246,7 +1256,7 @@ def build_address_page(ctx: AppContext) -> flet.View:
     return flet.View(
         route="address-page",
         appbar=flet.AppBar(
-            title=flet.Text("Address Page"),
+            title=flet.Text(ctx.t("address_page_title")),
             color="white",
             bgcolor="cyan",
             leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=ctx.controls["view_pop"]),
@@ -1255,7 +1265,7 @@ def build_address_page(ctx: AppContext) -> flet.View:
         horizontal_alignment=flet.CrossAxisAlignment.CENTER,
         scroll=flet.ScrollMode.AUTO,
         controls=[
-            flet.Text("Information:", size=30, font_family="Georgia"),
+            flet.Text(ctx.t("information"), size=30, font_family="Georgia"),
             ctx.controls["el_address_page"],
         ],
     )
