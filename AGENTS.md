@@ -412,6 +412,31 @@ adding or changing user-facing text:
 can never hide e.g. Send). The More hub, balance/history detail, priority-fee controls,
 and dev tools are all gated through it. Mode is persisted under `ui.experience`.
 
+## i18n migration (multi-session)
+
+Full plan: **`info/01-08-2026_i18n.md`** (gitignored — read it before continuing). The
+app migrates ~620 hardcoded English UI literals across `src/ui/` to `ctx.t()`/`ctx.tp()`
+in 5 phases; each phase = one commit, all 18 offline suites stay green.
+
+| Phase | Scope | Status |
+|---|---|---|
+| 1 — Foundation | `i18n.py` + `ctx.t`/`ctx.tp` + Settings language dropdown + devtools ru-hardcodes | ✅ `c344207` |
+| 2 — Visible screens | `app.py` + `balance.py` + `more.py` | ✅ `21b6213` |
+| 3 — Transfers + address book | `transfer.py` + `wallet_create.py` + `addressbook.py` + `security_gate.py` | ⬜ NEXT |
+| 4 — WEB3 tools | `walletconnect.py` + `nft.py` + `staking.py` + `swap.py` + `priority_fee.py` | ⬜ |
+| 5 — Finalize ru + AST audit | complete ru locale, plural audit, `find_translatable_strings()` = 0, Playwright EN+RU | ⬜ |
+
+**Resume checklist:** confirm baseline (`tests/test_app_ui.py` + `tests/test_i18n.py`),
+run the AST audit in the plan's §5 for the next module(s), follow §9. Keys live in
+`ui.i18n.TRANSLATIONS` — every key MUST have both `en` and `ru` (asserted by
+`test_translations_have_en_and_ru`).
+
+**Phase-2 decisions to carry forward:** lookup param is `msg_key` (NOT `key`) so `key`
+stays a free interpolation placeholder (§9); the `spam_hidden_sg/pl` pair is test-locked
+and must not change — a separate `spam_hidden_click_*` pair was added for the real UI
+string; intentionally untranslated per §7.1: the `Solana` brand, the `dev` badge,
+currency units (`SOL`), addresses/signatures, and on-chain logs (`f"• {log}"`).
+
 ## Android APK build + release signing
 
 Build + sign the app as a real Android APK (no `solana-py`/`solders`). Dependencies are
