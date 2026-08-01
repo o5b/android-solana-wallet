@@ -423,8 +423,8 @@ in 5 phases; each phase = one commit, all 18 offline suites stay green.
 | 1 — Foundation | `i18n.py` + `ctx.t`/`ctx.tp` + Settings language dropdown + devtools ru-hardcodes | ✅ `c344207` |
 | 2 — Visible screens | `app.py` + `balance.py` + `more.py` | ✅ `21b6213` |
 | 3 — Transfers + address book | `transfer.py` + `wallet_create.py` + `addressbook.py` + `security_gate.py` | ✅ `7e81ad6` |
-| 4 — WEB3 tools | `walletconnect.py` + `nft.py` + `staking.py` + `swap.py` + `priority_fee.py` | ⬜ NEXT |
-| 5 — Finalize ru + AST audit | complete ru locale, plural audit, `find_translatable_strings()` = 0, Playwright EN+RU | ⬜ |
+| 4 — WEB3 tools | `walletconnect.py` + `nft.py` + `staking.py` + `swap.py` + `priority_fee.py` | ✅ `598a23b` |
+| 5 — Finalize ru + AST audit | complete ru locale, plural audit, `find_translatable_strings()` = 0, Playwright EN+RU | ⬜ NEXT |
 
 **Resume checklist:** confirm baseline (`tests/test_app_ui.py` + `tests/test_i18n.py`),
 run the AST audit in the plan's §5 for the next module(s), follow §9. Keys live in
@@ -464,6 +464,49 @@ title — a pre-existing on-screen secret leak that the migration codified. The
 near-duplicate keys were collapsed into existing ones instead of minting new copies:
 `ab_title` → reuse `hub_address_book` (both "Address Book"); `lbl_address` → reuse
 `address_label` (both "Address: ").
+
+**Phase-4 decisions to carry forward (WEB3 tools — `walletconnect.py` + `nft.py` +
+`staking.py` + `swap.py` + `priority_fee.py`):** reused existing keys where the EN
+literal matched (`swap_btn` for the swap page's "Swap" button — exact-locked by
+`test_swap_ui`; `close` for the NFT detail "Close" button). Shared keys minted once and
+reused across modules: `get_quote` (swap + staking), `slippage_pct`, `invalid_amount_short`,
+`fetching_quote`, `min_received`/`price_impact`/`quote_error` (swap + staking quote UI),
+`wallet_dd_label` (nft + staking dropdown). `test_swap_ui` is the only suite that locks
+Phase-4 UI text — the exact EN values it asserts (`"Swap (Jupiter)"` ← `swap_appbar_title`,
+`"Get Quote"` ← `get_quote`, `"Swap"` ← `swap_btn`) reproduce the old literals byte-for-byte;
+the substring checks (`"mainnet"`/`"private key"`/`"Enter an amount"`) pass because the EN
+text still contains them. `test_priority_fee` tests only the `solana.compute_budget`
+business layer (no UI text); `test_wc2_integration`/`test_liquid_staking` test business
+layers, not the migrated UI.
+
+**Two `ctx.tp()` plurals added** (per §7.3): `unverified_prog_sg/pl` in `walletconnect.py`
+(`_render_preview` — the `⚠ {n} unverified program(s)` count in the anti-phishing
+simulation preview; `_render_preview` now takes `ctx` as its first arg) and
+`nft_found_sg/pl` (`{n} NFT(s) found`). EN is always the plural form; RU uses the
+`n%10==1 and n%100!=11` singular rule.
+
+**Intentionally NOT translated (§7.1 + Phase-3 Dev-diagnostic convention)** — the AST
+re-audit leaves exactly **11** constructor/kw literals across the 5 modules, all
+documented exemptions: network identifiers (`mainnet-beta`/`testnet`/`devnet` NFT
+checkboxes — Phase-2 convention), token/LST symbols as Dropdown **values**
+(`SOL`/`USDC`/`JitoSOL`), the brand + technical config label `"WalletConnect projectId"`
+(`wc_pid_input`), the slider format placeholder `"{value}"`, the technical unit
+`"µLamports / CU"` (Dev-only `custom_tf`), and the two Developer-gated diagnostic
+panels in `walletconnect.py` (`"Simulation logs:"` + the `f"• {log}"` on-chain lines,
+`"Raw session/request JSON:"` + the JSON dump) plus the priority-fee Dev-only
+`"Recent fees (µLamports/CU): …"` percentile readout — all mirror the Phase-3
+`_build_spl_token_detail` Pro/Dev-technical-output convention. The simulation-preview
+delta lines (`f"SOL Δ {acct}…"`, `f"Token Δ {acct}…"`) and `⚠ {warning}` lines in
+`_render_preview` are symbols/units/on-chain business output, so only their labels
+(`sim_method`/`sim_chain`/`sim_programs`/`sim_pred_status`/`sim_fee`/`sim_message`/
+`sim_preview_error`/`sim_unverified_list`) are translated. Debug `print(f"[SWAP] …")`
+logs in `swap.py` are untouched. The `_slippage_bps` `ValueError` messages in
+`staking.py` are validation exceptions rendered as the `{err}` value inside the
+translated `quote_error`/`stake_error` prefix (same pattern as the Phase-3
+`solana.address_check` reasons) — left untranslated. The `_dapp_name()` `"dApp"`
+fallback is a brand. `pf_estimate_amount` keeps `{ul:,}` thousands-separator format spec
+inline in the template (str.format supports it). `_nft_tile` gained a `ctx` first param
+(for the `unnamed_nft` fallback) — internal helper, no external signature impact.
 
 ## Android APK build + release signing
 
