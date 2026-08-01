@@ -418,6 +418,19 @@ Full plan: **`info/01-08-2026_i18n.md`** (gitignored — read it before continui
 app migrates ~620 hardcoded English UI literals across `src/ui/` to `ctx.t()`/`ctx.tp()`
 in 5 phases; each phase = one commit, all 18 offline suites stay green.
 
+> **STATUS: COMPLETE.** Both **English** and **Русский** are fully localized (437 keys,
+> each with `en`+`ru`, asserted by `test_translations_have_en_and_ru`). AST audit = 0
+> user-facing chrome literals (the only untranslated literals are 30 documented technical
+> exceptions: the `Solana` brand, network/commitment/RPC-method dropdown *values*,
+> token/LST symbols, the `µLamports / CU` unit, and Dev-only diagnostic panels/raw dumps).
+> All 5 phases are committed on `master` locally (NOT pushed): `c344207` → `21b6213` →
+> `7e81ad6` → `598a23b` → `ff5f988` (+ `40d147f` Phase-5 docs). Verified end-to-end:
+> 18 offline suites + `test_i18n` (64) + `test_settings_ui` (53) green, `git diff --check`
+> clean, Playwright EN+RU with 0 console errors, live language switch working, `flet build
+> apk` succeeds. The i18n task is done — only optional non-plan enhancements remain
+> (more languages, RTL/`ctx.rtl`, middle-form for the remaining 2-form `tp()` pairs).
+
+
 | Phase | Scope | Status |
 |---|---|---|
 | 1 — Foundation | `i18n.py` + `ctx.t`/`ctx.tp` + Settings language dropdown + devtools ru-hardcodes | ✅ `c344207` |
