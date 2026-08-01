@@ -63,15 +63,15 @@ async def ab_add(ctx: AppContext, name: str, address: str, note: str = "") -> tu
     address = (address or "").strip()
     note = (note or "").strip()
     if not name:
-        return False, "Contact name is required."
+        return False, ctx.t("ab_err_name")
     if not address:
-        return False, "Address is required."
+        return False, ctx.t("ab_err_address")
     if not is_valid_wallet_address(address):
-        return False, f"Not a valid Solana address: {address}"
+        return False, ctx.t("ab_err_invalid_addr", addr=address)
     contacts = await ab_load(ctx)
     for c in contacts:
         if (c.get("address") or "").strip() == address:
-            return False, "This address is already in your address book."
+            return False, ctx.t("ab_err_duplicate")
     contacts.append({
         "name": name,
         "address": address,
@@ -79,7 +79,7 @@ async def ab_add(ctx: AppContext, name: str, address: str, note: str = "") -> tu
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
     })
     await ab_save(ctx, contacts)
-    return True, f"Saved contact '{name}'."
+    return True, ctx.t("ab_saved", name=name)
 
 
 async def ab_delete(ctx: AppContext, address: str) -> None:
@@ -114,7 +114,7 @@ async def _gather_known_addresses(ctx: AppContext) -> list:
             if isinstance(w, dict) and w.get("address_base58"):
                 known.append({
                     "address": w["address_base58"],
-                    "label": w.get("name") or "My Wallet",
+                    "label": w.get("name") or ctx.t("my_wallet"),
                 })
     except Exception:
         pass
@@ -150,7 +150,7 @@ async def update_poisoning_banner(ctx: AppContext, banner: flet.Container, addre
     if res["exact"]:
         col.controls.append(flet.Row([
             flet.Icon(flet.Icons.VERIFIED_USER, color=flet.Colors.GREEN_700, size=18),
-            flet.Text(f"Known contact: {res['exact']['label'] or 'saved address'}",
+            flet.Text(ctx.t("poison_known", name=res['exact']['label'] or ctx.t("saved_address")),
                       size=12, color=flet.Colors.GREEN_700, selectable=True),
         ], wrap=True))
         banner.bgcolor = flet.Colors.GREEN_50
@@ -160,7 +160,7 @@ async def update_poisoning_banner(ctx: AppContext, banner: flet.Container, addre
             msgs.extend(w["reasons"])
         col.controls.append(flet.Row([
             flet.Icon(flet.Icons.DANGEROUS, color=flet.Colors.RED, size=18),
-            flet.Text("DANGER — possible address poisoning: " + " ".join(msgs)[:260],
+            flet.Text(ctx.t("poison_danger", reasons=" ".join(msgs)[:260]),
                       size=11, color=flet.Colors.RED_700, selectable=True),
         ], wrap=True))
         banner.bgcolor = flet.Colors.RED_50
@@ -170,13 +170,13 @@ async def update_poisoning_banner(ctx: AppContext, banner: flet.Container, addre
             msgs.extend(w["reasons"])
         col.controls.append(flet.Row([
             flet.Icon(flet.Icons.WARNING_AMBER_ROUNDED, color=flet.Colors.ORANGE, size=18),
-            flet.Text("Caution: " + " ".join(msgs)[:260],
+            flet.Text(ctx.t("poison_caution", reasons=" ".join(msgs)[:260]),
                       size=11, color=flet.Colors.ORANGE_800, selectable=True),
         ], wrap=True))
         banner.bgcolor = flet.Colors.ORANGE_50
     elif (address or "").strip() and res["valid"]:
         col.controls.append(flet.Text(
-            "This address is not in your address book. Double-check it carefully.",
+            ctx.t("poison_not_in_book"),
             size=11, color=flet.Colors.GREY_700, selectable=True))
         banner.bgcolor = None
     else:
@@ -197,8 +197,8 @@ async def open_contact_picker(ctx: AppContext, on_pick) -> None:
     contacts = await ab_load(ctx)
     if not contacts:
         page.show_dialog(flet.AlertDialog(
-            title=flet.Text("Your address book is empty."),
-            content=flet.Text("Add a contact on the Address Book page first."),
+            title=flet.Text(ctx.t("ab_empty")),
+            content=flet.Text(ctx.t("ab_empty_hint")),
         ))
         return
     col = flet.Column([], scroll=flet.ScrollMode.AUTO, tight=True, spacing=6)
@@ -215,7 +215,7 @@ async def open_contact_picker(ctx: AppContext, on_pick) -> None:
             content=flet.Row([
                 flet.Icon(flet.Icons.CONTACT_PAGE_OUTLINED, size=18, color=flet.Colors.BLUE),
                 flet.Column([
-                    flet.Text(name if name else "(no name)", size=14, weight=flet.FontWeight.BOLD),
+                    flet.Text(name if name else ctx.t("no_name"), size=14, weight=flet.FontWeight.BOLD),
                     flet.Text(short_addr(addr), size=10, color=flet.Colors.GREY_700, selectable=True),
                 ] + ([flet.Text(note, size=10, color=flet.Colors.GREY_500, selectable=True)] if note else []),
                     spacing=0, tight=True),
@@ -226,9 +226,9 @@ async def open_contact_picker(ctx: AppContext, on_pick) -> None:
 
     dlg = flet.AlertDialog(
         modal=True,
-        title=flet.Text("Pick a contact"),
+        title=flet.Text(ctx.t("ab_pick_contact")),
         content=flet.Container(content=col, width=360, height=min(60 + len(contacts) * 64, 420)),
-        actions=[flet.TextButton("Cancel", on_click=lambda ev: ctx.close_dialog(dlg))],
+        actions=[flet.TextButton(ctx.t("cancel"), on_click=lambda ev: ctx.close_dialog(dlg))],
     )
     page.show_dialog(dlg)
 
@@ -238,7 +238,7 @@ async def open_save_contact_dialog(ctx: AppContext, address: str) -> None:
     address = (address or "").strip()
     if not address:
         return
-    name_tf = flet.TextField(label="Contact name", autofocus=True, min_lines=1, max_lines=1, max_length=50)
+    name_tf = flet.TextField(label=ctx.t("contact_name"), autofocus=True, min_lines=1, max_lines=1, max_length=50)
 
     async def _save(ev):
         nm = (name_tf.value or "").strip()
@@ -251,14 +251,14 @@ async def open_save_contact_dialog(ctx: AppContext, address: str) -> None:
 
     dlg = flet.AlertDialog(
         modal=True,
-        title=flet.Text("Save to address book"),
+        title=flet.Text(ctx.t("ab_save_title")),
         content=flet.Column([
-            flet.Text(f"Address: {short_addr(address)}", selectable=True, size=12),
+            flet.Text(ctx.t("info_address", val=short_addr(address)), selectable=True, size=12),
             name_tf,
         ], tight=True),
         actions=[
-            flet.TextButton("Cancel", on_click=lambda ev: ctx.close_dialog(dlg)),
-            flet.ElevatedButton("Save", on_click=_save),
+            flet.TextButton(ctx.t("cancel"), on_click=lambda ev: ctx.close_dialog(dlg)),
+            flet.ElevatedButton(ctx.t("save"), on_click=_save),
         ],
     )
     page.show_dialog(dlg)
@@ -304,14 +304,11 @@ async def maybe_block_for_poisoning(ctx: AppContext, recipient_raw: str, rerun) 
         for reason in w["reasons"]:
             lines.append(f"[{w['severity'].upper()}] {lbl}{reason}")
     content_lines = [
-        flet.Text("This recipient may not be who you think it is.", size=13, weight=flet.FontWeight.BOLD),
-        flet.Text(f"Entered: {res['normalized'] or addr}", size=11, selectable=True, color=flet.Colors.GREY_800),
+        flet.Text(ctx.t("poison_recipient_warn"), size=13, weight=flet.FontWeight.BOLD),
+        flet.Text(ctx.t("poison_entered", val=res['normalized'] or addr), size=11, selectable=True, color=flet.Colors.GREY_800),
         flet.Text("\n".join(lines), size=11, selectable=True,
                   color=flet.Colors.RED_700 if is_danger else flet.Colors.ORANGE_800),
-        flet.Text(
-            "Address-poisoning scams send tiny amounts from a look-alike address "
-            "hoping you copy it by mistake. Continue ONLY if you have verified "
-            "the recipient out of band.", size=11, color=flet.Colors.GREY_700),
+        flet.Text(ctx.t("poison_explain"), size=11, color=flet.Colors.GREY_700),
     ]
 
     def _cancel(ev):
@@ -324,7 +321,7 @@ async def maybe_block_for_poisoning(ctx: AppContext, recipient_raw: str, rerun) 
         asyncio.create_task(rerun())
 
     proceed_btn = flet.ElevatedButton(
-        "I'm sure — proceed", on_click=_proceed,
+        ctx.t("poison_proceed"), on_click=_proceed,
         bgcolor=flet.Colors.RED if is_danger else flet.Colors.ORANGE,
         color=flet.Colors.WHITE,
     )
@@ -333,10 +330,10 @@ async def maybe_block_for_poisoning(ctx: AppContext, recipient_raw: str, rerun) 
         title=flet.Row([
             flet.Icon(flet.Icons.DANGEROUS if is_danger else flet.Icons.WARNING_AMBER_ROUNDED,
                       color=flet.Colors.RED if is_danger else flet.Colors.ORANGE),
-            flet.Text("Suspicious recipient"),
+            flet.Text(ctx.t("poison_suspicious_title")),
         ]),
         content=flet.Column(content_lines, tight=True, spacing=6),
-        actions=[flet.TextButton("Cancel", on_click=_cancel), proceed_btn],
+        actions=[flet.TextButton(ctx.t("cancel"), on_click=_cancel), proceed_btn],
     )
     page.show_dialog(dlg)
     return False
@@ -349,9 +346,9 @@ async def addressbook_enter(ctx: AppContext) -> None:
     page = ctx.page
     el_address_book = ctx.controls["el_address_book"]
     el_address_book.controls.clear()
-    name_tf = flet.TextField(label="Contact name", min_lines=1, max_lines=1, max_length=50)
-    addr_tf = flet.TextField(label="Solana address (base58)", min_lines=1, max_lines=2, max_length=100)
-    note_tf = flet.TextField(label="Note (optional)", min_lines=1, max_lines=2, max_length=200)
+    name_tf = flet.TextField(label=ctx.t("contact_name"), min_lines=1, max_lines=1, max_length=50)
+    addr_tf = flet.TextField(label=ctx.t("ab_solana_address"), min_lines=1, max_lines=2, max_length=100)
+    note_tf = flet.TextField(label=ctx.t("ab_note"), min_lines=1, max_lines=2, max_length=200)
     status = flet.Text(selectable=True, size=12)
 
     async def _add(ev):
@@ -364,35 +361,32 @@ async def addressbook_enter(ctx: AppContext) -> None:
         page.update()
 
     add_form = flet.Column([
-        flet.Text("Add contact", size=18, weight=flet.FontWeight.BOLD),
+        flet.Text(ctx.t("ab_add_contact"), size=18, weight=flet.FontWeight.BOLD),
         flet.Row([name_tf]),
         flet.Row([addr_tf]),
         flet.Row([note_tf]),
-        flet.Row([flet.ElevatedButton("Add Contact", on_click=_add), status]),
+        flet.Row([flet.ElevatedButton(ctx.t("ab_add_contact_btn"), on_click=_add), status]),
         flet.Divider(),
         flet.Row([
             flet.Icon(flet.Icons.SHIELD_OUTLINED, color=flet.Colors.GREEN_700),
-            flet.Text(
-                "Transfers warn you when a recipient looks like a saved contact "
-                "but isn't an exact match (address-poisoning protection).",
-                size=11, color=flet.Colors.GREY_700, selectable=True),
+            flet.Text(ctx.t("ab_protection_hint"), size=11, color=flet.Colors.GREY_700, selectable=True),
         ], wrap=True),
         flet.Divider(),
     ], spacing=8)
 
     contacts = await ab_load(ctx)
     if not contacts:
-        add_form.controls.append(flet.Text("No contacts yet.", size=12, color=flet.Colors.GREY_600))
+        add_form.controls.append(flet.Text(ctx.t("ab_no_contacts"), size=12, color=flet.Colors.GREY_600))
     else:
-        add_form.controls.append(flet.Text(f"Contacts ({len(contacts)}):", size=16, weight=flet.FontWeight.BOLD))
+        add_form.controls.append(flet.Text(ctx.t("ab_contacts_count", n=len(contacts)), size=16, weight=flet.FontWeight.BOLD))
         for c in contacts:
             addr = c.get("address", "")
-            name = c.get("name") or "(no name)"
+            name = c.get("name") or ctx.t("no_name")
             note = c.get("note") or ""
 
             async def _copy(ev, a=addr, n=name):
                 await page.clipboard.set(a)
-                status.value = f"Copied {n}."
+                status.value = ctx.t("ab_copied", name=n)
                 status.color = flet.Colors.GREEN
                 page.update()
 
@@ -407,8 +401,8 @@ async def addressbook_enter(ctx: AppContext) -> None:
                     flet.Text(addr, size=11, selectable=True, color=flet.Colors.GREY_800),
                 ] + ([flet.Text(note, size=11, selectable=True, color=flet.Colors.GREY_600)] if note else []) + [
                     flet.Row([
-                        flet.OutlinedButton("Copy", on_click=_copy),
-                        flet.OutlinedButton("Delete", on_click=_del,
+                        flet.OutlinedButton(ctx.t("copy"), on_click=_copy),
+                        flet.OutlinedButton(ctx.t("delete"), on_click=_del,
                                             style=flet.ButtonStyle(color=flet.Colors.RED)),
                     ]),
                 ], spacing=2),
@@ -433,7 +427,7 @@ def build_addressbook_page(ctx: AppContext) -> flet.View:
     return flet.View(
         route="addressbook-page",
         appbar=flet.AppBar(
-            title=flet.Text("Address Book"),
+            title=flet.Text(ctx.t("hub_address_book")),
             color="white",
             bgcolor="#0d9488",
             leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
@@ -442,7 +436,7 @@ def build_addressbook_page(ctx: AppContext) -> flet.View:
         horizontal_alignment=flet.CrossAxisAlignment.CENTER,
         scroll=flet.ScrollMode.AUTO,
         controls=[
-            flet.Text('Address Book', size=30, font_family="Georgia"),
+            flet.Text(ctx.t("hub_address_book"), size=30, font_family="Georgia"),
             ctx.controls["el_address_book"],
         ],
     )

@@ -243,7 +243,301 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Wipe every wallet, PIN and pairing. Irreversible.",
         "ru": "Стереть все кошельки, PIN и привязки. Безвозвратно.",
     },
-    # ...keys added as modules are migrated (Phases 3-5)...
+    # --- security_gate.py (PIN setup/unlock dialogs) - Phase 3 ---
+    "pin_create": {"en": "Create a PIN ({n}+ digits)", "ru": "Создайте PIN-код ({n}+ цифр)"},
+    "pin_confirm": {"en": "Confirm PIN", "ru": "Подтвердите PIN-код"},
+    "pin_too_short": {"en": "PIN must be {n}+ digits.", "ru": "PIN-код должен быть из {n}+ цифр."},
+    "pin_mismatch": {"en": "PINs do not match.", "ru": "PIN-коды не совпадают."},
+    "pin_setup_title": {"en": "Set up a PIN", "ru": "Настройка PIN-кода"},
+    "pin_setup_desc": {
+        "en": "This PIN encrypts your private keys at rest and unlocks the app. "
+              "Do not forget it: lost PINs cannot be recovered.",
+        "ru": "Этот PIN-код шифрует ваши приватные ключи и разблокирует приложение. "
+              "Не забывайте его: утраченный PIN-код восстановить нельзя.",
+    },
+    "pin_set_btn": {"en": "Set PIN", "ru": "Задать PIN-код"},
+    "pin_enter": {"en": "Enter PIN", "ru": "Введите PIN-код"},
+    "pin_incorrect": {"en": "Incorrect PIN.", "ru": "Неверный PIN-код."},
+    "pin_unlock": {"en": "Unlock", "ru": "Разблокировать"},
+    "pin_forgot": {"en": "Forgot PIN?", "ru": "Забыли PIN-код?"},
+    "reset_everything_q": {"en": "Reset everything?", "ru": "Сбросить всё?"},
+    "reset_everything_desc": {
+        "en": "This will permanently delete the PIN and ALL stored wallets "
+              "(their encrypted keys become unrecoverable). Only continue "
+              "if you have your seed phrases backed up.",
+        "ru": "Это безвозвратно удалит PIN-код и ВСЕ сохранённые кошельки "
+              "(их зашифрованные ключи станет невозможно восстановить). "
+              "Продолжайте, только если у вас есть резервные копии сид-фраз.",
+    },
+    "reset_wipe": {"en": "Reset & Wipe", "ru": "Сбросить и стереть"},
+    # --- addressbook.py (contacts + poisoning gate) - Phase 3 ---
+    "ab_empty": {"en": "Your address book is empty.", "ru": "Ваша адресная книга пуста."},
+    "ab_empty_hint": {
+        "en": "Add a contact on the Address Book page first.",
+        "ru": "Сначала добавьте контакт на странице «Адресная книга».",
+    },
+    "no_name": {"en": "(no name)", "ru": "(без имени)"},
+    "ab_pick_contact": {"en": "Pick a contact", "ru": "Выберите контакт"},
+    "contact_name": {"en": "Contact name", "ru": "Имя контакта"},
+    "ab_save_title": {"en": "Save to address book", "ru": "Сохранить в адресную книгу"},
+    "ab_solana_address": {"en": "Solana address (base58)", "ru": "Адрес Solana (base58)"},
+    "ab_note": {"en": "Note (optional)", "ru": "Заметка (необязательно)"},
+    "ab_add_contact": {"en": "Add contact", "ru": "Добавить контакт"},
+    "ab_add_contact_btn": {"en": "Add Contact", "ru": "Добавить контакт"},
+    "ab_protection_hint": {
+        "en": "Transfers warn you when a recipient looks like a saved contact "
+              "but isn't an exact match (address-poisoning protection).",
+        "ru": "Переводы предупреждают, когда получатель похож на сохранённый "
+              "контакт, но не совпадает точно (защита от отравления адресов).",
+    },
+    "ab_no_contacts": {"en": "No contacts yet.", "ru": "Пока нет контактов."},
+    "ab_contacts_count": {"en": "Contacts ({n}):", "ru": "Контакты ({n}):"},
+    "ab_copied": {"en": "Copied {name}.", "ru": "Скопировано: {name}."},
+    "ab_err_name": {"en": "Contact name is required.", "ru": "Укажите имя контакта."},
+    "ab_err_address": {"en": "Address is required.", "ru": "Укажите адрес."},
+    "ab_err_invalid_addr": {
+        "en": "Not a valid Solana address: {addr}",
+        "ru": "Недопустимый адрес Solana: {addr}",
+    },
+    "ab_err_duplicate": {
+        "en": "This address is already in your address book.",
+        "ru": "Этот адрес уже есть в адресной книге.",
+    },
+    "ab_saved": {"en": "Saved contact '{name}'.", "ru": "Контакт «{name}» сохранён."},
+    "my_wallet": {"en": "My Wallet", "ru": "Мой кошелёк"},
+    "saved_address": {"en": "saved address", "ru": "сохранённый адрес"},
+    "poison_known": {"en": "Known contact: {name}", "ru": "Известный контакт: {name}"},
+    "poison_danger": {
+        "en": "DANGER — possible address poisoning: {reasons}",
+        "ru": "ОПАСНО — возможное отравление адресов: {reasons}",
+    },
+    "poison_caution": {"en": "Caution: {reasons}", "ru": "Внимание: {reasons}"},
+    "poison_not_in_book": {
+        "en": "This address is not in your address book. Double-check it carefully.",
+        "ru": "Этого адреса нет в вашей адресной книге. Тщательно перепроверьте его.",
+    },
+    "poison_recipient_warn": {
+        "en": "This recipient may not be who you think it is.",
+        "ru": "Получатель может быть не тем, за кого себя выдаёт.",
+    },
+    "poison_entered": {"en": "Entered: {val}", "ru": "Введено: {val}"},
+    "poison_explain": {
+        "en": "Address-poisoning scams send tiny amounts from a look-alike address "
+              "hoping you copy it by mistake. Continue ONLY if you have verified "
+              "the recipient out of band.",
+        "ru": "При отравлении адресов мошенники отправляют крошечные суммы с похожего "
+              "адреса, надеясь, что вы скопируете его по ошибке. Продолжайте, ТОЛЬКО "
+              "если вы проверили получателя другим способом.",
+    },
+    "poison_proceed": {"en": "I'm sure — proceed", "ru": "Я уверен — продолжить"},
+    "poison_suspicious_title": {"en": "Suspicious recipient", "ru": "Подозрительный получатель"},
+    # --- wallet_create.py (create/recover/add pages + seed quiz) - Phase 3 ---
+    "wallet_name_field": {"en": "Wallet Name", "ru": "Название кошелька"},
+    "wallet_desc_field": {"en": "Wallet description", "ru": "Описание кошелька"},
+    "recover_secret_field": {
+        "en": "Wallet Secret Words (12/24) or Secret Key base58 (length=88)",
+        "ru": "Секретные слова кошелька (12/24) или секретный ключ base58 (длина=88)",
+    },
+    "add_address_field": {"en": "Add Wallet Address (base58) ", "ru": "Добавить адрес кошелька (base58) "},
+    "clear": {"en": "Clear", "ru": "Очистить"},
+    "copied_to_clipboard": {
+        "en": "Data copied to clipboard!",
+        "ru": "Данные скопированы в буфер обмена!",
+    },
+    "card_created": {"en": "Created:", "ru": "Создан:"},
+    "card_name": {"en": "Wallet Name:", "ru": "Название кошелька:"},
+    "card_desc": {"en": "Wallet Description:", "ru": "Описание кошелька:"},
+    "card_address": {
+        "en": "Wallet Address (Base58, size 44):",
+        "ru": "Адрес кошелька (Base58, размер 44):",
+    },
+    "card_secret_key": {
+        "en": "Secret Key (Base58, size 88, e.g. Phantom):",
+        "ru": "Секретный ключ (Base58, размер 88, напр. Phantom):",
+    },
+    "card_private_key": {"en": "Private Key (Hex, size 64):", "ru": "Приватный ключ (Hex, размер 64):"},
+    "card_public_key": {"en": "Public Key (Hex):", "ru": "Публичный ключ (Hex):"},
+    "card_words": {"en": "Mnemonic Words (12/24 words):", "ru": "Мнемонические слова (12/24 слова):"},
+    "error_colon": {"en": "Error:", "ru": "Ошибка:"},
+    "quiz_intro": {
+        "en": "Confirm your recovery phrase by entering the requested words.",
+        "ru": "Подтвердите фразу восстановления, введя запрошенные слова.",
+    },
+    "quiz_word": {"en": "Word #{n}", "ru": "Слово #{n}"},
+    "quiz_wrong": {
+        "en": "One or more words are incorrect. Check your spelling and try again.",
+        "ru": "Одно или несколько слов неверны. Проверьте написание и попробуйте снова.",
+    },
+    "verify_backup_title": {"en": "Verify your backup", "ru": "Проверьте резервную копию"},
+    "quiz_show_again": {"en": "Show words again", "ru": "Показать слова снова"},
+    "verify_btn": {"en": "Verify", "ru": "Проверить"},
+    "reveal_warning": {
+        "en": "These 12 words are the ONLY way to recover this wallet. "
+              "Write them down and store them safely. No one can recover them for you.",
+        "ru": "Эти 12 слов — единственный способ восстановить этот кошелёк. "
+              "Запишите их и храните в надёжном месте. Никто не сможет восстановить их за вас.",
+    },
+    "reveal_next": {
+        "en": "You will be asked to confirm them on the next screen.",
+        "ru": "На следующем экране вас попросят их подтвердить.",
+    },
+    "reveal_title": {"en": "Your recovery phrase", "ru": "Ваша фраза восстановления"},
+    "reveal_written": {"en": "I've written it down", "ru": "Я записал их"},
+    "create_wallet_page_title": {"en": "Create New Wallet Page", "ru": "Страница создания кошелька"},
+    "create_new_wallet": {"en": "Create New Wallet", "ru": "Создать новый кошелёк"},
+    "recover_wallet_page_title": {"en": "Recover Wallet Page", "ru": "Страница восстановления"},
+    "recover_wallet_header": {"en": "Recover wallet", "ru": "Восстановить кошелёк"},
+    "add_wallet_page_title": {"en": "Add Wallet Address Page", "ru": "Страница добавления адреса"},
+    "add_wallet_header": {"en": "Add wallet address", "ru": "Добавить адрес кошелька"},
+    "err_input_secret": {"en": "Input the secret", "ru": "Введите секрет"},
+    "err_input_address": {"en": "Input the wallet address", "ru": "Введите адрес кошелька"},
+    # --- transfer.py (SOL/SPL transfer, burn/close) - Phase 3 ---
+    "amount_field": {"en": "Input the amount", "ru": "Введите количество"},
+    "amount_sol_field": {"en": "Input the amount of SOL", "ru": "Введите количество SOL"},
+    "recipient_field": {"en": "Recipient address or name.sol", "ru": "Адрес получателя или name.sol"},
+    "secret_field": {
+        "en": "Enter Secret (12/24 Words or Private Key)",
+        "ru": "Введите секрет (12/24 слова или приватный ключ)",
+    },
+    "tooltip_pick_contact": {"en": "Pick from address book", "ru": "Выбрать из адресной книги"},
+    "tooltip_save_contact": {"en": "Save recipient as contact", "ru": "Сохранить получателя как контакт"},
+    "inspect_solscan": {"en": "Inspect on Solscan", "ru": "Проверить в Solscan"},
+    "transfer_token_btn": {"en": "Transfer Token", "ru": "Перевести токен"},
+    "transfer_sol_btn": {"en": "Transfer SOL", "ru": "Перевести SOL"},
+    "burn_btn": {"en": "Burn", "ru": "Сжечь"},
+    "burn_all_close_btn": {"en": "Burn All & Close Account", "ru": "Сжечь всё и закрыть аккаунт"},
+    "burn_close_btn": {"en": "Burn & Close", "ru": "Сжечь и закрыть"},
+    "burn_close_hint": {
+        "en": "Burn destroys tokens. Close Account also refunds the rent SOL (~0.002) to your wallet.",
+        "ru": "Сжигание уничтожает токены. Закрытие аккаунта также возвращает арендную плату SOL (~0,002) в ваш кошелёк.",
+    },
+    "burn_close_q": {"en": "Burn all and close account?", "ru": "Сжечь всё и закрыть аккаунт?"},
+    "burn_close_confirm": {
+        "en": "This will DESTROY your entire balance of {symbol} and close the "
+              "token account, refunding the rent (~0.002 SOL) to your wallet. "
+              "This action cannot be undone.",
+        "ru": "Это УНИЧТОЖИТ весь ваш баланс {symbol} и закроет токен-аккаунт, "
+              "вернув арендную плату (~0,002 SOL) в ваш кошелёк. "
+              "Это действие нельзя отменить.",
+    },
+    "burning": {"en": "BURNING...", "ru": "СЖИГАНИЕ..."},
+    "burning_closing": {"en": "BURNING & CLOSING...", "ru": "СЖИГАНИЕ И ЗАКРЫТИЕ..."},
+    "token_page_title": {"en": "Token Page", "ru": "Страница токена"},
+    "spl_transfer_title": {"en": "SPL Token Transfer", "ru": "Перевод SPL-токена"},
+    "transfer_spl_title": {"en": "Transfer SPL Token", "ru": "Перевод SPL-токена"},
+    "transfer_sol_info": {"en": "Transfer sol info:", "ru": "Информация о переводе SOL:"},
+    "err_drop_down_btn": {
+        "en": "Error spl_token_arrow_drop_down_button_click!",
+        "ru": "Ошибка spl_token_arrow_drop_down_button_click!",
+    },
+    "err_drop_up_btn": {
+        "en": "Error spl_token_arrow_drop_up_button_click!",
+        "ru": "Ошибка spl_token_arrow_drop_up_button_click!",
+    },
+    # transfer TextSpan labels
+    "lbl_network": {"en": "Network: ", "ru": "Сеть: "},
+    "lbl_from_address": {"en": "From Address: ", "ru": "Адрес отправителя: "},
+    "lbl_token": {"en": "Token: ", "ru": "Токен: "},
+    "lbl_amount": {"en": "Amount: ", "ru": "Количество: "},
+    "lbl_info_msg": {"en": "Information message: ", "ru": "Информационное сообщение: "},
+    "lbl_from": {"en": "From: ", "ru": "От: "},
+    "lbl_to": {"en": "To: ", "ru": "Кому: "},
+    "lbl_transfer": {"en": "Transfer: ", "ru": "Перевод: "},
+    "lbl_balance_before": {"en": "Balance before: ", "ru": "Баланс до: "},
+    "lbl_balance_after": {"en": "Balance after: ", "ru": "Баланс после: "},
+    # transfer result / validation messages
+    "key_required": {
+        "en": "Private key is required (unlock the wallet or enter the secret).",
+        "ru": "Требуется приватный ключ (разблокируйте кошелёк или введите секрет).",
+    },
+    "key_error": {"en": "Error getting private key: {err}", "ru": "Ошибка получения приватного ключа: {err}"},
+    "key_seed_failed": {
+        "en": "Failed to get private key from seed phrase.",
+        "ru": "Не удалось получить приватный ключ из сид-фразы.",
+    },
+    "invalid_secret": {"en": "Invalid secret.", "ru": "Недопустимый секрет."},
+    "no_key_generic": {
+        "en": "Could not proceed. Private key is missing or invalid.",
+        "ru": "Не удалось продолжить. Приватный ключ отсутствует или недействителен.",
+    },
+    "no_key_transfer": {
+        "en": "Could not proceed with transfer. Private key is missing or invalid.",
+        "ru": "Не удалось выполнить перевод. Приватный ключ отсутствует или недействителен.",
+    },
+    "spl_transfer_ok": {
+        "en": "Transfer of {amount} {symbol} was successful!",
+        "ru": "Перевод {amount} {symbol} выполнен успешно!",
+    },
+    "transfer_error": {"en": "Transfer Error: {err}", "ru": "Ошибка перевода: {err}"},
+    "transfer_failed": {
+        "en": "Transfer failed for an unknown reason.",
+        "ru": "Перевод не выполнен по неизвестной причине.",
+    },
+    "invalid_amount": {"en": "Invalid transfer amount.", "ru": "Недопустимая сумма перевода."},
+    "invalid_amount_format": {"en": "Invalid amount format.", "ru": "Недопустимый формат суммы."},
+    "invalid_recipient": {"en": "Invalid recipient address.", "ru": "Недопустимый адрес получателя."},
+    "invalid_burn_amount": {"en": "Invalid burn amount.", "ru": "Недопустимая сумма сжигания."},
+    "burn_ok": {
+        "en": "Burn of {amount} {symbol} was successful!",
+        "ru": "Сжигание {amount} {symbol} выполнено успешно!",
+    },
+    "burn_error": {"en": "Burn Error: {err}", "ru": "Ошибка сжигания: {err}"},
+    "burn_failed": {
+        "en": "Burn failed for an unknown reason.",
+        "ru": "Сжигание не выполнено по неизвестной причине.",
+    },
+    "burn_close_ok": {
+        "en": "All {symbol} burned and the token account was closed. "
+              "Rent SOL has been refunded to {addr}.",
+        "ru": "Все {symbol} сожжены, а токен-аккаунт закрыт. "
+              "Арендная плата SOL возвращена на {addr}.",
+    },
+    "burn_close_error": {"en": "Burn & Close Error: {err}", "ru": "Ошибка сжигания и закрытия: {err}"},
+    "burn_close_failed": {
+        "en": "Burn & Close failed for an unknown reason.",
+        "ru": "Сжигание и закрытие не выполнены по неизвестной причине.",
+    },
+    "sol_transfer_fee": {"en": "Transfer fee: {fee} SOL", "ru": "Комиссия за перевод: {fee} SOL"},
+    "sol_transfer_ok": {
+        "en": "Transfer of {amount} SOL was Successfully!",
+        "ru": "Перевод {amount} SOL выполнен успешно!",
+    },
+    "sol_transfer_error": {
+        "en": "Error during Transfer. Error Msg: {err}",
+        "ru": "Ошибка при переводе. Сообщение об ошибке: {err}",
+    },
+    "sol_transfer_error_bare": {"en": "Error during Transfer!", "ru": "Ошибка при переводе!"},
+    "sol_error_result": {"en": "Error Result: {result}", "ru": "Ошибка результата: {result}"},
+    "sol_insufficient": {
+        "en": "Not enough SOL balance for transfer.",
+        "ru": "Недостаточно SOL для перевода.",
+    },
+    "sol_invalid_amount": {
+        "en": "The amount of SOL={amount} is not valid. Please enter the correct number.",
+        "ru": "Сумма SOL={amount} недопустима. Введите корректное число.",
+    },
+    "sol_invalid_recipient": {
+        "en": "The recipient wallet address: {addr} is not valid. Please enter the correct recipient wallet address.",
+        "ru": "Адрес получателя: {addr} недопустим. Введите корректный адрес получателя.",
+    },
+    "sol_key_error_attempts": {
+        "en": "Error after: {attempts} attempts to get private key from secret words! Error Msg: {err}",
+        "ru": "Ошибка после: {attempts} попыток получить приватный ключ из секретных слов! Сообщение: {err}",
+    },
+    "sol_key_failed": {
+        "en": "Failed to get private key after: {attempts} attempts from secret words",
+        "ru": "Не удалось получить приватный ключ после: {attempts} попыток из секретных слов",
+    },
+    "sol_error_secret": {"en": "Error Secret!", "ru": "Ошибка секрета!"},
+    "airdrop_no_result": {
+        "en": "Not Result request airdrop sol for wallet: {addr}",
+        "ru": "Нет результата запроса airdrop SOL для кошелька: {addr}",
+    },
+    "airdrop_result": {
+        "en": "The result airdrop SOL for wallet address: {addr}: {result}",
+        "ru": "Результат запроса airdrop SOL для адреса: {addr}: {result}",
+    },
+    # ...keys added as modules are migrated (Phases 4-5)...
 }
 
 # ---- human-readable language names for the Settings dropdown -----------------

@@ -126,7 +126,7 @@ def resolve_signing_key(ctx: AppContext, data: dict, secret_control=None) -> tup
         except Exception:
             input_secret = ''
     if not input_secret:
-        return '', "Private key is required (unlock the wallet or enter the secret)."
+        return '', ctx.t("key_required")
     wallet_data = data['wallet_data']
     if is_valid_wallet_seed_phrase(input_secret):
         for attempt in range(10):
@@ -134,11 +134,11 @@ def resolve_signing_key(ctx: AppContext, data: dict, secret_control=None) -> tup
             if wallet_address_base58 == wallet_data['address_base58']:
                 return new_private_key_hex, ''
             if error:
-                return '', f"Error getting private key: {error}"
-        return '', "Failed to get private key from seed phrase."
+                return '', ctx.t("key_error", err=error)
+        return '', ctx.t("key_seed_failed")
     if is_valid_private_key(input_secret) and len(input_secret) == 64:
         return input_secret, ''
-    return '', "Invalid secret."
+    return '', ctx.t("invalid_secret")
 
 
 # ====================== token detail expander (balance) =====================
@@ -171,7 +171,7 @@ async def _build_spl_token_detail(ctx: AppContext, data: dict) -> list:
                 flet.Row(
                     [
                         flet.ElevatedButton(
-                            content=flet.Text("Inspect on Solscan"),
+                            content=flet.Text(ctx.t("inspect_solscan")),
                             icon=flet.Icons.OPEN_IN_NEW,
                             on_click=lambda _e, u=url: page.launch_url(u),
                         ),
@@ -239,7 +239,7 @@ async def spl_token_arrow_drop_down_click(ctx: AppContext, e):
         print(f'Error spl_token_arrow_drop_down_button_click: {er}')
         page.show_dialog(
             flet.AlertDialog(
-                title=flet.Text("Error spl_token_arrow_drop_down_button_click!"),
+                title=flet.Text(ctx.t("err_drop_down_btn")),
             )
         )
     finally:
@@ -272,7 +272,7 @@ async def spl_token_arrow_drop_up_click(ctx: AppContext, e):
         print(f'Error spl_token_arrow_drop_up_button_click: {er}')
         page.show_dialog(
             flet.AlertDialog(
-                title=flet.Text("Error spl_token_arrow_drop_up_button_click!"),
+                title=flet.Text(ctx.t("err_drop_up_btn")),
             )
         )
     finally:
@@ -298,13 +298,13 @@ async def open_spl_token_page(ctx: AppContext, data):
     el_spl_token_page = ctx.controls["el_spl_token_page"]
     el_spl_token_page.controls.clear()
     amount_tf = flet.TextField(
-        label="Input the amount",
+        label=ctx.t("amount_field"),
         value=("1" if data.get('nft_prefill_amount') is not None else None),
         min_lines=1, max_lines=1, max_length=20,
     )
-    recipient_tf = flet.TextField(label="Recipient address or name.sol", min_lines=1, max_lines=1, max_length=100, expand=True)
+    recipient_tf = flet.TextField(label=ctx.t("recipient_field"), min_lines=1, max_lines=1, max_length=100, expand=True)
     sns_status = flet.Text(size=11, selectable=True, color=flet.Colors.BLUE_700)
-    secret_tf = flet.TextField(label="Enter Secret (12/24 Words or Private Key)", min_lines=1, max_lines=1, max_length=100)
+    secret_tf = flet.TextField(label=ctx.t("secret_field"), min_lines=1, max_lines=1, max_length=100)
     burn_status = flet.Column()
     pf_block, pf_state = await make_priority_fee_block(ctx, data['network'], data['raw_data']['mint'], cu_limit=80000)
 
@@ -352,20 +352,20 @@ async def open_spl_token_page(ctx: AppContext, data):
             flet.Row(
                 [
                     flet.ElevatedButton(
-                        content=flet.Text("Burn"),
+                        content=flet.Text(ctx.t("burn_btn")),
                         on_click=lambda ev: burn_spl_click(ctx, ev),
                         data=burn_data,
                         disabled=False if (data['spl_amount'] and data['spl_amount'] > 0) else True,
                     ),
                     flet.ElevatedButton(
-                        content=flet.Text("Burn All & Close Account"),
+                        content=flet.Text(ctx.t("burn_all_close_btn")),
                         on_click=lambda ev: burn_and_close_click(ctx, ev),
                         data=close_data,
                     ),
                 ],
             ),
             flet.Text(
-                value="Burn destroys tokens. Close Account also refunds the rent SOL (~0.002) to your wallet.",
+                value=ctx.t("burn_close_hint"),
                 size=11,
                 color=flet.Colors.GREY_600,
             ),
@@ -380,7 +380,7 @@ async def open_spl_token_page(ctx: AppContext, data):
                         value='',
                         selectable=True,
                         spans=[
-                            flet.TextSpan('Network: ', flet.TextStyle(size=16)),
+                            flet.TextSpan(ctx.t("lbl_network"), flet.TextStyle(size=16)),
                             flet.TextSpan(f'{data["network"]} ', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
                         ]
                     ),
@@ -392,7 +392,7 @@ async def open_spl_token_page(ctx: AppContext, data):
                         value='',
                         selectable=True,
                         spans=[
-                            flet.TextSpan('From Address: ', flet.TextStyle(size=16)),
+                            flet.TextSpan(ctx.t("lbl_from_address"), flet.TextStyle(size=16)),
                             flet.TextSpan(f'{data["wallet_address"]} ', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
                         ]
                     ),
@@ -404,7 +404,7 @@ async def open_spl_token_page(ctx: AppContext, data):
                         value='',
                         selectable=True,
                         spans=[
-                            flet.TextSpan('Token: ', flet.TextStyle(size=16)),
+                            flet.TextSpan(ctx.t("lbl_token"), flet.TextStyle(size=16)),
                             flet.TextSpan(f'{data["symbol"]} ', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
                         ]
                     ),
@@ -416,7 +416,7 @@ async def open_spl_token_page(ctx: AppContext, data):
                         value='',
                         selectable=True,
                         spans=[
-                            flet.TextSpan('Amount: ', flet.TextStyle(size=16)),
+                            flet.TextSpan(ctx.t("lbl_amount"), flet.TextStyle(size=16)),
                             flet.TextSpan(f'{data["spl_amount"]} ', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
                         ]
                     ),
@@ -428,12 +428,12 @@ async def open_spl_token_page(ctx: AppContext, data):
                     recipient_tf,
                     flet.IconButton(
                         icon=flet.Icons.CONTACTS_OUTLINED,
-                        tooltip="Pick from address book",
+                        tooltip=ctx.t("tooltip_pick_contact"),
                         on_click=_open_picker,
                     ),
                     flet.IconButton(
                         icon=flet.Icons.PERSON_ADD_ALT_OUTLINED,
-                        tooltip="Save recipient as contact",
+                        tooltip=ctx.t("tooltip_save_contact"),
                         on_click=_save_contact,
                     ),
                 ],
@@ -445,7 +445,7 @@ async def open_spl_token_page(ctx: AppContext, data):
             flet.Row(
                 [
                     flet.ElevatedButton(
-                        content=flet.Text("Transfer Token"),
+                        content=flet.Text(ctx.t("transfer_token_btn")),
                         on_click=lambda ev: transfer_spl_click(ctx, ev),
                         data=transfer_data,
                     ),
@@ -483,7 +483,7 @@ async def transfer_spl_click(ctx: AppContext, e):
     e.control.disabled = True
     e.control.parent.parent.controls[-1].controls.clear()
     e.control.parent.parent.controls[-1].controls.append(
-        flet.Row([flet.ProgressRing(), flet.Text("PLEASE WAIT")], alignment=flet.MainAxisAlignment.CENTER)
+        flet.Row([flet.ProgressRing(), flet.Text(ctx.t("please_wait"))], alignment=flet.MainAxisAlignment.CENTER)
     )
     page.update()
 
@@ -499,14 +499,14 @@ async def transfer_spl_click(ctx: AppContext, e):
                     private_key_hex = new_private_key_hex
                     break
                 elif error:
-                    alert_dialog_text = f"Error getting private key: {error}"
+                    alert_dialog_text = ctx.t("key_error", err=error)
             else:
-                alert_dialog_text = "Failed to get private key from seed phrase."
+                alert_dialog_text = ctx.t("key_seed_failed")
         elif is_valid_private_key(input_secret):
              if len(input_secret) == 64:
                 private_key_hex = input_secret
         else:
-            alert_dialog_text = "Invalid secret."
+            alert_dialog_text = ctx.t("invalid_secret")
 
     if private_key_hex:
         if is_valid_wallet_address(recipient_address):
@@ -535,20 +535,20 @@ async def transfer_spl_click(ctx: AppContext, e):
                         cu_limit=data.get('cu_limit', 80000),
                     )
                     if 'result' in result:
-                        alert_dialog_text = f"Transfer of {transfer_amount} {data['symbol']} was successful!"
+                        alert_dialog_text = ctx.t("spl_transfer_ok", amount=transfer_amount, symbol=data['symbol'])
                     elif 'error' in result:
-                        alert_dialog_text = f"Transfer Error: {result['error']}"
+                        alert_dialog_text = ctx.t("transfer_error", err=result['error'])
                     else:
-                        alert_dialog_text = "Transfer failed for an unknown reason."
+                        alert_dialog_text = ctx.t("transfer_failed")
                 else:
-                    alert_dialog_text = "Invalid transfer amount."
+                    alert_dialog_text = ctx.t("invalid_amount")
             else:
-                alert_dialog_text = "Invalid amount format."
+                alert_dialog_text = ctx.t("invalid_amount_format")
         else:
-            alert_dialog_text = "Invalid recipient address."
+            alert_dialog_text = ctx.t("invalid_recipient")
 
     if not alert_dialog_text:
-         alert_dialog_text = "Could not proceed with transfer. Private key is missing or invalid."
+         alert_dialog_text = ctx.t("no_key_transfer")
 
     page.show_dialog(flet.AlertDialog(title=flet.Text(alert_dialog_text)))
     e.control.parent.parent.controls[-1].controls.clear()
@@ -565,7 +565,7 @@ async def burn_spl_click(ctx: AppContext, e):
     if status is not None:
         status.controls.clear()
         status.controls.append(
-            flet.Row([flet.ProgressRing(), flet.Text("BURNING...")], alignment=flet.MainAxisAlignment.CENTER)
+            flet.Row([flet.ProgressRing(), flet.Text(ctx.t("burning"))], alignment=flet.MainAxisAlignment.CENTER)
         )
     page.update()
 
@@ -595,17 +595,17 @@ async def burn_spl_click(ctx: AppContext, e):
                     cu_limit=data.get('cu_limit', 80000),
                 )
                 if 'result' in result:
-                    alert_dialog_text = f"Burn of {amount} {data['symbol']} was successful!"
+                    alert_dialog_text = ctx.t("burn_ok", amount=amount, symbol=data['symbol'])
                 elif 'error' in result:
-                    alert_dialog_text = f"Burn Error: {result['error']}"
+                    alert_dialog_text = ctx.t("burn_error", err=result['error'])
                 else:
-                    alert_dialog_text = "Burn failed for an unknown reason."
+                    alert_dialog_text = ctx.t("burn_failed")
             else:
-                alert_dialog_text = "Invalid burn amount."
+                alert_dialog_text = ctx.t("invalid_burn_amount")
         else:
-            alert_dialog_text = "Invalid amount format."
+            alert_dialog_text = ctx.t("invalid_amount_format")
     else:
-        alert_dialog_text = key_err or "Could not proceed. Private key is missing or invalid."
+        alert_dialog_text = key_err or ctx.t("no_key_generic")
 
     page.show_dialog(flet.AlertDialog(title=flet.Text(alert_dialog_text)))
     e.control.disabled = False
@@ -627,7 +627,7 @@ async def burn_and_close_click(ctx: AppContext, e):
         if status is not None:
             status.controls.clear()
             status.controls.append(
-                flet.Row([flet.ProgressRing(), flet.Text("BURNING & CLOSING...")], alignment=flet.MainAxisAlignment.CENTER)
+                flet.Row([flet.ProgressRing(), flet.Text(ctx.t("burning_closing"))], alignment=flet.MainAxisAlignment.CENTER)
             )
         page.update()
 
@@ -645,16 +645,14 @@ async def burn_and_close_click(ctx: AppContext, e):
                 cu_limit=data.get('cu_limit', 80000),
             )
             if 'result' in result:
-                alert_dialog_text = (
-                    f"All {data['symbol']} burned and the token account was closed. "
-                    f"Rent SOL has been refunded to {data['wallet_address']}."
-                )
+                alert_dialog_text = ctx.t(
+                    "burn_close_ok", symbol=data['symbol'], addr=data['wallet_address'])
             elif 'error' in result:
-                alert_dialog_text = f"Burn & Close Error: {result['error']}"
+                alert_dialog_text = ctx.t("burn_close_error", err=result['error'])
             else:
-                alert_dialog_text = "Burn & Close failed for an unknown reason."
+                alert_dialog_text = ctx.t("burn_close_failed")
         else:
-            alert_dialog_text = key_err or "Could not proceed. Private key is missing or invalid."
+            alert_dialog_text = key_err or ctx.t("no_key_generic")
 
         page.show_dialog(flet.AlertDialog(title=flet.Text(alert_dialog_text)))
         if status is not None:
@@ -667,16 +665,14 @@ async def burn_and_close_click(ctx: AppContext, e):
 
     dlg = flet.AlertDialog(
         modal=True,
-        title=flet.Text("Burn all and close account?"),
+        title=flet.Text(ctx.t("burn_close_q")),
         content=flet.Text(
-            f"This will DESTROY your entire balance of {data['symbol']} and close the "
-            f"token account, refunding the rent (~0.002 SOL) to your wallet. "
-            f"This action cannot be undone.",
+            ctx.t("burn_close_confirm", symbol=data['symbol']),
             selectable=True,
         ),
         actions=[
-            flet.TextButton("Cancel", on_click=_cancel),
-            flet.ElevatedButton("Burn & Close", on_click=_execute, bgcolor=flet.Colors.RED, color=flet.Colors.WHITE),
+            flet.TextButton(ctx.t("cancel"), on_click=_cancel),
+            flet.ElevatedButton(ctx.t("burn_close_btn"), on_click=_execute, bgcolor=flet.Colors.RED, color=flet.Colors.WHITE),
         ],
     )
     page.show_dialog(dlg)
@@ -697,7 +693,7 @@ async def go_to_token_page_click(ctx: AppContext, e):
     pf_block, pf_state = await make_priority_fee_block(ctx, data['network'], data['wallet_address'], cu_limit=2000)
 
     recipient_tf = flet.TextField(
-        label="Recipient address or name.sol", min_lines=1, max_lines=1, max_length=100, expand=True,
+        label=ctx.t("recipient_field"), min_lines=1, max_lines=1, max_length=100, expand=True,
     )
     sns_status = flet.Text(size=11, selectable=True, color=flet.Colors.BLUE_700)
     poisoning_banner = make_poisoning_banner()
@@ -734,7 +730,7 @@ async def go_to_token_page_click(ctx: AppContext, e):
                         value='',
                         selectable=True,
                         spans=[
-                            flet.TextSpan('Network: ', flet.TextStyle(size=16)),
+                            flet.TextSpan(ctx.t("lbl_network"), flet.TextStyle(size=16)),
                             flet.TextSpan(f'{data['network']} ', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
                         ]
                     ),
@@ -746,7 +742,7 @@ async def go_to_token_page_click(ctx: AppContext, e):
                         value='',
                         selectable=True,
                         spans=[
-                            flet.TextSpan('Address: ', flet.TextStyle(size=16)),
+                            flet.TextSpan(ctx.t("address_label"), flet.TextStyle(size=16)),
                             flet.TextSpan(f'{data['wallet_address']} ', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
                         ]
                     ),
@@ -758,7 +754,7 @@ async def go_to_token_page_click(ctx: AppContext, e):
                         value='',
                         selectable=True,
                         spans=[
-                            flet.TextSpan('Amount: ', flet.TextStyle(size=16)),
+                            flet.TextSpan(ctx.t("lbl_amount"), flet.TextStyle(size=16)),
                             flet.TextSpan(f'{data['sol_amount']} ', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
                             flet.TextSpan('SOL', flet.TextStyle(size=16)),
                         ]
@@ -767,7 +763,7 @@ async def go_to_token_page_click(ctx: AppContext, e):
             ),
             flet.Row(
                 [
-                    flet.TextField(label="Input the amount of SOL", min_lines=1, max_lines=1, max_length=20)
+                    flet.TextField(label=ctx.t("amount_sol_field"), min_lines=1, max_lines=1, max_length=20)
                 ],
             ),
             flet.Row(
@@ -775,12 +771,12 @@ async def go_to_token_page_click(ctx: AppContext, e):
                     recipient_tf,
                     flet.IconButton(
                         icon=flet.Icons.CONTACTS_OUTLINED,
-                        tooltip="Pick from address book",
+                        tooltip=ctx.t("tooltip_pick_contact"),
                         on_click=_open_picker,
                     ),
                     flet.IconButton(
                         icon=flet.Icons.PERSON_ADD_ALT_OUTLINED,
-                        tooltip="Save recipient as contact",
+                        tooltip=ctx.t("tooltip_save_contact"),
                         on_click=_save_contact,
                     ),
                 ],
@@ -791,7 +787,7 @@ async def go_to_token_page_click(ctx: AppContext, e):
             flet.Row(
                 [
                     flet.ElevatedButton(
-                        content=flet.Text("Transfer SOL"),
+                        content=flet.Text(ctx.t("transfer_sol_btn")),
                         on_click=lambda ev: transfer_sol_click(ctx, ev),
                         data=transfer_data,
                     ),
@@ -805,7 +801,7 @@ async def go_to_token_page_click(ctx: AppContext, e):
             5,
             flet.Row(
                 [
-                    flet.TextField(label="Enter Secret (12/24 Words or Private Key)", min_lines=1, max_lines=1, max_length=100)
+                    flet.TextField(label=ctx.t("secret_field"), min_lines=1, max_lines=1, max_length=100)
                 ],
             )
         )
@@ -836,7 +832,7 @@ async def transfer_sol_click(ctx: AppContext, e):
     e.control.disabled = True  # блокируем кнопку
     e.control.parent.parent.controls[-1].controls.clear()
     e.control.parent.parent.controls[-1].controls.append(
-        flet.Row([flet.ProgressRing(), flet.Text("PLEASE WAIT")], alignment=flet.MainAxisAlignment.CENTER)
+        flet.Row([flet.ProgressRing(), flet.Text(ctx.t("please_wait"))], alignment=flet.MainAxisAlignment.CENTER)
     )
     page.update()
     result_transfer_txt = ''
@@ -857,14 +853,14 @@ async def transfer_sol_click(ctx: AppContext, e):
                     private_key_hex = new_private_key_hex
                     break
                 elif error:
-                    alert_dialog_text = f"Error after: {attempt} attempts to get private key from secret words: {input_secret}! Error Msg: {error}"
+                    alert_dialog_text = ctx.t("sol_key_error_attempts", attempts=attempt, err=error)
             else:
-                alert_dialog_text = f'Failed to get private key after: {attempt} attempts from secret words: {input_secret}'
+                alert_dialog_text = ctx.t("sol_key_failed", attempts=attempt)
         elif is_valid_private_key(input_secret):
             if len(input_secret) == 64:
                 private_key_hex = input_secret
         else:
-            alert_dialog_text = "Error Secret!"
+            alert_dialog_text = ctx.t("sol_error_secret")
 
     if private_key_hex:
         recipient_address = resolved_recipient
@@ -897,25 +893,25 @@ async def transfer_sol_click(ctx: AppContext, e):
                         sol_balance_after = await get_sol_balance(address=data['wallet_data']['address_base58'], network=data['network'])
                         if sol_balance_after:
                             e.control.parent.parent.controls[2].controls[0].spans=[
-                                flet.TextSpan('Amount: ', flet.TextStyle(size=16)),
+                                flet.TextSpan(ctx.t("lbl_amount"), flet.TextStyle(size=16)),
                                 flet.TextSpan(f'{sol_balance_after} ', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
                                 flet.TextSpan('SOL', flet.TextStyle(size=16)),
                             ]
                             transfer_fee = data['sol_amount'] - sol_balance_after - transfer_sol_amount
-                            result_transfer_txt = f"Transfer fee: {transfer_fee:.9f} SOL"
-                        alert_dialog_text = f"Transfer of {transfer_sol_amount} SOL was Successfully!"
+                            result_transfer_txt = ctx.t("sol_transfer_fee", fee=f"{transfer_fee:.9f}")
+                        alert_dialog_text = ctx.t("sol_transfer_ok", amount=transfer_sol_amount)
                     elif 'error' in result:
-                        alert_dialog_text = f"Error during Transfer. Error Msg: {result['error']}"
+                        alert_dialog_text = ctx.t("sol_transfer_error", err=result['error'])
                     elif not result:
-                        alert_dialog_text = "Error during Transfer!"
+                        alert_dialog_text = ctx.t("sol_transfer_error_bare")
                     else:
-                        alert_dialog_text = f"Error Result: {result}"
+                        alert_dialog_text = ctx.t("sol_error_result", result=result)
                 else:
-                    alert_dialog_text = "Not enough SOL balance for transfer."
+                    alert_dialog_text = ctx.t("sol_insufficient")
             else:
-                alert_dialog_text = f"The amount of SOL={transfer_sol_amount} is not valid. Please enter the correct number."
+                alert_dialog_text = ctx.t("sol_invalid_amount", amount=transfer_sol_amount)
         else:
-            alert_dialog_text = f"The recipient wallet address: {recipient_address} is not valid. Please enter the correct recipient wallet address."
+            alert_dialog_text = ctx.t("sol_invalid_recipient", addr=recipient_address)
     page.show_dialog(
         flet.AlertDialog(
             title=flet.Text(alert_dialog_text),
@@ -928,7 +924,7 @@ async def transfer_sol_click(ctx: AppContext, e):
             flet.Divider(thickness=3),
             flet.Row(
                 [
-                    flet.Text(value='Transfer sol info:', size=14),
+                    flet.Text(value=ctx.t("transfer_sol_info"), size=14),
                 ],
                 alignment=flet.MainAxisAlignment.CENTER,
             ),
@@ -938,7 +934,7 @@ async def transfer_sol_click(ctx: AppContext, e):
                         value='',
                         selectable=True,
                         spans=[
-                            flet.TextSpan('Information message: ', flet.TextStyle(size=16)),
+                            flet.TextSpan(ctx.t("lbl_info_msg"), flet.TextStyle(size=16)),
                             flet.TextSpan(f'{alert_dialog_text}', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
                         ]
                     ),
@@ -951,7 +947,7 @@ async def transfer_sol_click(ctx: AppContext, e):
                         value='',
                         selectable=True,
                         spans=[
-                            flet.TextSpan('From: ', flet.TextStyle(size=16)),
+                            flet.TextSpan(ctx.t("lbl_from"), flet.TextStyle(size=16)),
                             flet.TextSpan(f'{data['wallet_data']['address_base58']}', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
                         ]
                     ),
@@ -963,7 +959,7 @@ async def transfer_sol_click(ctx: AppContext, e):
                         value='',
                         selectable=True,
                         spans=[
-                            flet.TextSpan('To: ', flet.TextStyle(size=16)),
+                            flet.TextSpan(ctx.t("lbl_to"), flet.TextStyle(size=16)),
                             flet.TextSpan(f'{recipient_address}', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
                         ]
                     ),
@@ -975,7 +971,7 @@ async def transfer_sol_click(ctx: AppContext, e):
                         value='',
                         selectable=True,
                         spans=[
-                            flet.TextSpan('Transfer: ', flet.TextStyle(size=16)),
+                            flet.TextSpan(ctx.t("lbl_transfer"), flet.TextStyle(size=16)),
                             flet.TextSpan(f'{transfer_sol_amount} ', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
                             flet.TextSpan('SOL', flet.TextStyle(size=16)),
                         ]
@@ -988,7 +984,7 @@ async def transfer_sol_click(ctx: AppContext, e):
                         value='',
                         selectable=True,
                         spans=[
-                            flet.TextSpan('Balance before: ', flet.TextStyle(size=16)),
+                            flet.TextSpan(ctx.t("lbl_balance_before"), flet.TextStyle(size=16)),
                             flet.TextSpan(f'{data['sol_amount']} ', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
                             flet.TextSpan('SOL', flet.TextStyle(size=16)),
                         ]
@@ -1001,7 +997,7 @@ async def transfer_sol_click(ctx: AppContext, e):
                         value='',
                         selectable=True,
                         spans=[
-                            flet.TextSpan('Balance after: ', flet.TextStyle(size=16)),
+                            flet.TextSpan(ctx.t("lbl_balance_after"), flet.TextStyle(size=16)),
                             flet.TextSpan(f'{sol_balance_after} ', flet.TextStyle(size=16, weight=flet.FontWeight.BOLD)),
                             flet.TextSpan('SOL', flet.TextStyle(size=16)),
                         ]
@@ -1031,19 +1027,19 @@ async def request_airdrop_click(ctx: AppContext, e):
     e.control.disabled = True  # блокируем кнопку
     e.control.parent.parent.controls[-1].controls.clear()
     e.control.parent.parent.controls[-1].controls.append(
-        flet.Row([flet.ProgressRing(), flet.Text("PLEASE WAIT")], alignment=flet.MainAxisAlignment.CENTER)
+        flet.Row([flet.ProgressRing(), flet.Text(ctx.t("please_wait"))], alignment=flet.MainAxisAlignment.CENTER)
     )
     page.update()
     result_transfer_txt = ''
     sol_balance_after = ''
-    alert_dialog_text = f"Not Result request airdrop sol for wallet: {data['wallet_address']}"
+    alert_dialog_text = ctx.t("airdrop_no_result", addr=data['wallet_address'])
     transfer_sol_amount = ''
     recipient_address = ''
 
     if is_valid_wallet_address(data['wallet_address']):
         result = await request_airdrop(pubkey=data['wallet_address'], lamports=1_000_000_000, network=data['network'])
 
-        alert_dialog_text = f"The result airdrop SOL for wallet address: {data['wallet_address']}: {result}"
+        alert_dialog_text = ctx.t("airdrop_result", addr=data['wallet_address'], result=result)
 
     page.show_dialog(
         flet.AlertDialog(
@@ -1067,7 +1063,7 @@ def build_token_page(ctx: AppContext) -> flet.View:
     return flet.View(
         route="token-page",
         appbar=flet.AppBar(
-            title=flet.Text("Token Page"),
+            title=flet.Text(ctx.t("token_page_title")),
             color="white",
             bgcolor="cyan",
             leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
@@ -1076,7 +1072,7 @@ def build_token_page(ctx: AppContext) -> flet.View:
         horizontal_alignment=flet.CrossAxisAlignment.CENTER,
         scroll=flet.ScrollMode.AUTO,
         controls=[
-            flet.Text('Information:', size=30, font_family="Georgia"),
+            flet.Text(ctx.t("information"), size=30, font_family="Georgia"),
             ctx.controls["el_token_page"],
         ]
     )
@@ -1089,7 +1085,7 @@ def build_spl_token_page(ctx: AppContext) -> flet.View:
     return flet.View(
         route="spl-token-page",
         appbar=flet.AppBar(
-            title=flet.Text("SPL Token Transfer"),
+            title=flet.Text(ctx.t("spl_transfer_title")),
             color="white",
             bgcolor="purple",
             leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
@@ -1098,7 +1094,7 @@ def build_spl_token_page(ctx: AppContext) -> flet.View:
         horizontal_alignment=flet.CrossAxisAlignment.CENTER,
         scroll=flet.ScrollMode.AUTO,
         controls=[
-            flet.Text('Transfer SPL Token', size=30, font_family="Georgia"),
+            flet.Text(ctx.t("transfer_spl_title"), size=30, font_family="Georgia"),
             ctx.controls["el_spl_token_page"],
         ]
     )

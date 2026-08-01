@@ -41,31 +41,31 @@ async def build_wallet_pages(ctx) -> tuple:
 
     # ============================== Form inputs ==============================
     input_wallet_name = flet.TextField(
-        label="Wallet Name", min_lines=1, max_lines=1, max_length=50,
+        label=ctx.t("wallet_name_field"), min_lines=1, max_lines=1, max_length=50,
     )
     input_wallet_description = flet.TextField(
-        label="Wallet description", min_lines=2, max_lines=5, max_length=200,
+        label=ctx.t("wallet_desc_field"), min_lines=2, max_lines=5, max_length=200,
     )
 
     input_recover_wallet_name = flet.TextField(
-        label="Wallet Name", min_lines=1, max_lines=1, max_length=50,
+        label=ctx.t("wallet_name_field"), min_lines=1, max_lines=1, max_length=50,
     )
     input_recover_wallet_description = flet.TextField(
-        label="Wallet description", min_lines=2, max_lines=5, max_length=200,
+        label=ctx.t("wallet_desc_field"), min_lines=2, max_lines=5, max_length=200,
     )
     input_recover_wallet_secret = flet.TextField(
-        label="Wallet Secret Words (12/24) or Secret Key base58 (length=88)",
+        label=ctx.t("recover_secret_field"),
         min_lines=2, max_lines=5, max_length=200,
     )
 
     input_add_address_wallet_name = flet.TextField(
-        label="Wallet Name", min_lines=1, max_lines=1, max_length=50,
+        label=ctx.t("wallet_name_field"), min_lines=1, max_lines=1, max_length=50,
     )
     input_add_address_wallet_description = flet.TextField(
-        label="Wallet description", min_lines=2, max_lines=5, max_length=200,
+        label=ctx.t("wallet_desc_field"), min_lines=2, max_lines=5, max_length=200,
     )
     input_add_wallet_address = flet.TextField(
-        label="Add Wallet Address (base58) ", min_lines=2, max_lines=5, max_length=200,
+        label=ctx.t("add_address_field"), min_lines=2, max_lines=5, max_length=200,
     )
 
     # ====================== Display-only result fields ======================
@@ -131,7 +131,7 @@ async def build_wallet_pages(ctx) -> tuple:
                 'address_base58': txt_add_address_wallet_address.value,
             }
         await page.clipboard.set(json.dumps(data_to_copy, indent=2))
-        page.show_dialog(flet.AlertDialog(title=flet.Text("Data copied to clipboard!")))
+        page.show_dialog(flet.AlertDialog(title=flet.Text(ctx.t("copied_to_clipboard"))))
 
     # ========================= Save / clear handlers ========================
     async def generate_new_solana_wallet_card_save_button_clicked(e):
@@ -164,7 +164,7 @@ async def build_wallet_pages(ctx) -> tuple:
         page.update()
 
     generate_new_solana_wallet_card_save_button = flet.TextButton(
-        "Save",
+        ctx.t("save"),
         on_click=generate_new_solana_wallet_card_save_button_clicked,
         data=0,
     )
@@ -200,7 +200,7 @@ async def build_wallet_pages(ctx) -> tuple:
         page.update()
 
     recover_solana_wallet_card_save_button = flet.TextButton(
-        "Save",
+        ctx.t("save"),
         on_click=recover_solana_wallet_card_save_button_clicked,
         data=0,
     )
@@ -232,7 +232,7 @@ async def build_wallet_pages(ctx) -> tuple:
         page.update()
 
     add_address_solana_wallet_card_save_button = flet.TextButton(
-        "Save",
+        ctx.t("save"),
         on_click=add_address_solana_wallet_card_save_button_clicked,
         data=0,
     )
@@ -254,7 +254,7 @@ async def build_wallet_pages(ctx) -> tuple:
         page.update()
 
     generate_new_solana_wallet_card_clear_button = flet.TextButton(
-        "Clear",
+        ctx.t("clear"),
         on_click=generate_new_solana_wallet_card_clear_button_clicked,
         data=0,
     )
@@ -277,7 +277,7 @@ async def build_wallet_pages(ctx) -> tuple:
         page.update()
 
     recover_solana_wallet_card_clear_button = flet.TextButton(
-        "Clear",
+        ctx.t("clear"),
         on_click=recover_solana_wallet_card_clear_button_clicked,
         data=0,
     )
@@ -295,7 +295,7 @@ async def build_wallet_pages(ctx) -> tuple:
         page.update()
 
     add_address_solana_wallet_card_clear_button = flet.TextButton(
-        "Clear",
+        ctx.t("clear"),
         on_click=add_address_solana_wallet_card_clear_button_clicked,
         data=0,
     )
@@ -305,26 +305,26 @@ async def build_wallet_pages(ctx) -> tuple:
         content=flet.Container(
             content=flet.Column(
                 [
-                    flet.Text("Created:", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_created"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_wallet_created,
-                    flet.Text("Wallet Name:", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_name"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_wallet_name,
-                    flet.Text("Wallet Description:", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_desc"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_wallet_description,
-                    flet.Text("Wallet Address (Base58, size 44):", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_address"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_wallet_address,
-                    flet.Text("Secret Key (Base58, size 88, e.g. Phantom):", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_secret_key"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_secret_key_base58,
-                    flet.Text("Private Key (Hex, size 64):", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_private_key"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_private_key,
-                    flet.Text("Public Key (Hex):", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_public_key"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_public_key,
-                    flet.Text("Mnemonic Words (12/24 words):", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_words"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_words,
                     flet.Row(
                         [
                             generate_new_solana_wallet_card_save_button,
-                            flet.TextButton("Copy", on_click=lambda e: page.run_task(copy_wallet_data_click, e, 'create')),
+                            flet.TextButton(ctx.t("copy"), on_click=lambda e: page.run_task(copy_wallet_data_click, e, 'create')),
                             generate_new_solana_wallet_card_clear_button,
                         ],
                         alignment=flet.MainAxisAlignment.END,
@@ -340,26 +340,26 @@ async def build_wallet_pages(ctx) -> tuple:
         content=flet.Container(
             content=flet.Column(
                 [
-                    flet.Text("Created:", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_created"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_recover_wallet_created,
-                    flet.Text("Wallet Name:", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_name"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_recover_wallet_name,
-                    flet.Text("Wallet Description:", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_desc"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_recover_wallet_description,
-                    flet.Text("Wallet Address (Base58, size 44):", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_address"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_recover_wallet_address,
-                    flet.Text("Secret Key (Base58, size 88, e.g. Phantom):", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_secret_key"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_recover_secret_key_base58,
-                    flet.Text("Private Key (Hex, size 64):", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_private_key"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_recover_private_key,
-                    flet.Text("Public Key (Hex):", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_public_key"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_recover_public_key,
-                    flet.Text("Mnemonic Words (12/24 words):", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_words"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_recover_words,
                     flet.Row(
                         [
                             recover_solana_wallet_card_save_button,
-                            flet.TextButton("Copy", on_click=lambda e: page.run_task(copy_wallet_data_click, e, 'recover')),
+                            flet.TextButton(ctx.t("copy"), on_click=lambda e: page.run_task(copy_wallet_data_click, e, 'recover')),
                             recover_solana_wallet_card_clear_button,
                         ],
                         alignment=flet.MainAxisAlignment.END,
@@ -375,18 +375,18 @@ async def build_wallet_pages(ctx) -> tuple:
         content=flet.Container(
             content=flet.Column(
                 [
-                    flet.Text("Created:", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_created"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_add_address_wallet_created,
-                    flet.Text("Wallet Name:", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_name"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_add_address_wallet_name,
-                    flet.Text("Wallet Description:", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_desc"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_add_address_wallet_description,
-                    flet.Text("Wallet Address (Base58, size 44):", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
+                    flet.Text(ctx.t("card_address"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD, selectable=True),
                     txt_add_address_wallet_address,
                     flet.Row(
                         [
                             add_address_solana_wallet_card_save_button,
-                            flet.TextButton("Copy", on_click=lambda e: page.run_task(copy_wallet_data_click, e, 'add')),
+                            flet.TextButton(ctx.t("copy"), on_click=lambda e: page.run_task(copy_wallet_data_click, e, 'add')),
                             add_address_solana_wallet_card_clear_button,
                         ],
                         alignment=flet.MainAxisAlignment.END,
@@ -403,7 +403,7 @@ async def build_wallet_pages(ctx) -> tuple:
         content=flet.Container(
             content=flet.Column(
                 [
-                    flet.Text("Error:", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD),
+                    flet.Text(ctx.t("error_colon"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD),
                     txt_error,
                 ]
             ),
@@ -416,7 +416,7 @@ async def build_wallet_pages(ctx) -> tuple:
         content=flet.Container(
             content=flet.Column(
                 [
-                    flet.Text("Error:", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD),
+                    flet.Text(ctx.t("error_colon"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD),
                     txt_recover_error,
                 ]
             ),
@@ -429,7 +429,7 @@ async def build_wallet_pages(ctx) -> tuple:
         content=flet.Container(
             content=flet.Column(
                 [
-                    flet.Text("Error:", size=16, font_family="Georgia", weight=flet.FontWeight.BOLD),
+                    flet.Text(ctx.t("error_colon"), size=16, font_family="Georgia", weight=flet.FontWeight.BOLD),
                     txt_add_address_error,
                 ]
             ),
@@ -475,10 +475,10 @@ async def build_wallet_pages(ctx) -> tuple:
             positions = sorted(random.sample(range(len(words_list)), min(2, len(words_list))))
             fields = []
             quiz_rows = [
-                flet.Text("Confirm your recovery phrase by entering the requested words.", size=12),
+                flet.Text(ctx.t("quiz_intro"), size=12),
             ]
             for pos in positions:
-                tf = flet.TextField(label=f"Word #{pos + 1}", min_lines=1, max_lines=1, max_length=30)
+                tf = flet.TextField(label=ctx.t("quiz_word", n=pos + 1), min_lines=1, max_lines=1, max_length=30)
                 fields.append((pos, tf))
                 quiz_rows.append(tf)
             quiz_err = flet.Text("", color="red")
@@ -494,7 +494,7 @@ async def build_wallet_pages(ctx) -> tuple:
                     create_wallet_page.controls.append(generate_new_solana_wallet_card)
                     page.update()
                 else:
-                    quiz_err.value = "One or more words are incorrect. Check your spelling and try again."
+                    quiz_err.value = ctx.t("quiz_wrong")
                     page.update()
 
             async def reveal_again(inner):
@@ -504,11 +504,11 @@ async def build_wallet_pages(ctx) -> tuple:
 
             quiz_dlg = flet.AlertDialog(
                 modal=True,
-                title=flet.Text("Verify your backup"),
+                title=flet.Text(ctx.t("verify_backup_title")),
                 content=flet.Column(quiz_rows + [quiz_err], tight=True),
                 actions=[
-                    flet.TextButton("Show words again", on_click=reveal_again),
-                    flet.ElevatedButton("Verify", on_click=verify),
+                    flet.TextButton(ctx.t("quiz_show_again"), on_click=reveal_again),
+                    flet.ElevatedButton(ctx.t("verify_btn"), on_click=verify),
                 ],
                 actions_alignment=flet.MainAxisAlignment.END,
             )
@@ -518,18 +518,17 @@ async def build_wallet_pages(ctx) -> tuple:
             nonlocal reveal_dlg
             reveal_rows = [
                 flet.Text(
-                    "These 12 words are the ONLY way to recover this wallet. "
-                    "Write them down and store them safely. No one can recover them for you.",
+                    ctx.t("reveal_warning"),
                     size=12, color="red",
                 ),
                 flet.Text(words, selectable=True, size=14, weight=flet.FontWeight.BOLD),
-                flet.Text("You will be asked to confirm them on the next screen.", size=12),
+                flet.Text(ctx.t("reveal_next"), size=12),
             ]
             reveal_dlg = flet.AlertDialog(
                 modal=True,
-                title=flet.Text("Your recovery phrase"),
+                title=flet.Text(ctx.t("reveal_title")),
                 content=flet.Column(reveal_rows, tight=True),
-                actions=[flet.ElevatedButton("I've written it down", on_click=start_quiz)],
+                actions=[flet.ElevatedButton(ctx.t("reveal_written"), on_click=start_quiz)],
                 actions_alignment=flet.MainAxisAlignment.END,
             )
             page.show_dialog(reveal_dlg)
@@ -545,7 +544,7 @@ async def build_wallet_pages(ctx) -> tuple:
         if input_recover_wallet_secret.value:
             words, wallet_address_base58, secret_key_base58, private_key_hex, public_key_hex, error = create_solana_wallet(secret=input_recover_wallet_secret.value.strip())
         else:
-            error = 'Input the secret'
+            error = ctx.t("err_input_secret")
 
         if error:
             txt_recover_error.value = error
@@ -571,7 +570,7 @@ async def build_wallet_pages(ctx) -> tuple:
 
         error = ''
         if not input_add_wallet_address.value.strip():
-            error = 'Input the wallet address'
+            error = ctx.t("err_input_address")
 
         if error:
             txt_add_address_error.value = error
@@ -588,7 +587,7 @@ async def build_wallet_pages(ctx) -> tuple:
     create_wallet_page = flet.View(
         route="create-wallet-page",
         appbar=flet.AppBar(
-            title=flet.Text("Create New Wallet Page"),
+            title=flet.Text(ctx.t("create_wallet_page_title")),
             color="white",
             bgcolor="teal",
             leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
@@ -597,12 +596,12 @@ async def build_wallet_pages(ctx) -> tuple:
         horizontal_alignment=flet.CrossAxisAlignment.CENTER,
         scroll=flet.ScrollMode.AUTO,
         controls=[
-            flet.Row([flet.Text('Create New Wallet', size=30, font_family="Georgia")], alignment=flet.MainAxisAlignment.CENTER),
+            flet.Row([flet.Text(ctx.t("create_new_wallet"), size=30, font_family="Georgia")], alignment=flet.MainAxisAlignment.CENTER),
             flet.Row([input_wallet_name], alignment=flet.MainAxisAlignment.CENTER),
             flet.Row([input_wallet_description], alignment=flet.MainAxisAlignment.CENTER),
             flet.Row(
                 [
-                    flet.OutlinedButton(content=flet.Text('Create New Wallet'), width=200, height=40, on_click=generate_new_solana_wallet_button)
+                    flet.OutlinedButton(content=flet.Text(ctx.t("create_new_wallet")), width=200, height=40, on_click=generate_new_solana_wallet_button)
                 ],
                 alignment=flet.MainAxisAlignment.CENTER,
             ),
@@ -612,7 +611,7 @@ async def build_wallet_pages(ctx) -> tuple:
     recover_wallet_page = flet.View(
         route="recover-wallet-page",
         appbar=flet.AppBar(
-            title=flet.Text("Recover Wallet Page"),
+            title=flet.Text(ctx.t("recover_wallet_page_title")),
             color="white",
             bgcolor="cyan",
             leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
@@ -621,13 +620,13 @@ async def build_wallet_pages(ctx) -> tuple:
         horizontal_alignment=flet.CrossAxisAlignment.CENTER,
         scroll=flet.ScrollMode.AUTO,
         controls=[
-            flet.Row([flet.Text('Recover wallet', size=30, font_family="Georgia")], alignment=flet.MainAxisAlignment.CENTER),
+            flet.Row([flet.Text(ctx.t("recover_wallet_header"), size=30, font_family="Georgia")], alignment=flet.MainAxisAlignment.CENTER),
             flet.Row([input_recover_wallet_name], alignment=flet.MainAxisAlignment.CENTER),
             flet.Row([input_recover_wallet_description], alignment=flet.MainAxisAlignment.CENTER),
             flet.Row([input_recover_wallet_secret], alignment=flet.MainAxisAlignment.CENTER),
             flet.Row(
                 [
-                    flet.OutlinedButton(content=flet.Text('Recover Wallet'), width=200, height=40, on_click=recover_solana_wallet_button)
+                    flet.OutlinedButton(content=flet.Text(ctx.t("recover_wallet")), width=200, height=40, on_click=recover_solana_wallet_button)
                 ],
                 alignment=flet.MainAxisAlignment.CENTER,
             ),
@@ -637,7 +636,7 @@ async def build_wallet_pages(ctx) -> tuple:
     add_wallet_address_page = flet.View(
         route="add-wallet-address-page",
         appbar=flet.AppBar(
-            title=flet.Text("Add Wallet Address Page"),
+            title=flet.Text(ctx.t("add_wallet_page_title")),
             color="white",
             bgcolor="cyan",
             leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
@@ -646,13 +645,13 @@ async def build_wallet_pages(ctx) -> tuple:
         horizontal_alignment=flet.CrossAxisAlignment.CENTER,
         scroll=flet.ScrollMode.AUTO,
         controls=[
-            flet.Row([flet.Text('Add wallet address', size=30, font_family="Georgia")], alignment=flet.MainAxisAlignment.CENTER),
+            flet.Row([flet.Text(ctx.t("add_wallet_header"), size=30, font_family="Georgia")], alignment=flet.MainAxisAlignment.CENTER),
             flet.Row([input_add_address_wallet_name], alignment=flet.MainAxisAlignment.CENTER),
             flet.Row([input_add_address_wallet_description], alignment=flet.MainAxisAlignment.CENTER),
             flet.Row([input_add_wallet_address], alignment=flet.MainAxisAlignment.CENTER),
             flet.Row(
                 [
-                    flet.OutlinedButton(content=flet.Text('Add Wallet Address'), width=200, height=40, on_click=add_address_solana_wallet_button)
+                    flet.OutlinedButton(content=flet.Text(ctx.t("add_wallet_address")), width=200, height=40, on_click=add_address_solana_wallet_button)
                 ],
                 alignment=flet.MainAxisAlignment.CENTER,
             ),

@@ -129,11 +129,11 @@ async def show_setup_dialog(ctx):
     page = ctx.page
     session = ctx.session
     tf1 = flet.TextField(
-        label=f"Create a PIN ({MIN_PIN_LENGTH}+ digits)", password=True,
+        label=ctx.t("pin_create", n=MIN_PIN_LENGTH), password=True,
         can_reveal_password=True, keyboard_type=flet.KeyboardType.NUMBER, autofocus=True,
     )
     tf2 = flet.TextField(
-        label="Confirm PIN", password=True, can_reveal_password=True,
+        label=ctx.t("pin_confirm"), password=True, can_reveal_password=True,
         keyboard_type=flet.KeyboardType.NUMBER,
     )
     err = flet.Text("", color="red")
@@ -141,11 +141,11 @@ async def show_setup_dialog(ctx):
     async def confirm(ev):
         p1, p2 = tf1.value or "", tf2.value or ""
         if not validate_pin(p1):
-            err.value = f"PIN must be {MIN_PIN_LENGTH}+ digits."
+            err.value = ctx.t("pin_too_short", n=MIN_PIN_LENGTH)
             page.update()
             return
         if p1 != p2:
-            err.value = "PINs do not match."
+            err.value = ctx.t("pin_mismatch")
             page.update()
             return
         salt = make_salt()
@@ -160,19 +160,18 @@ async def show_setup_dialog(ctx):
 
     dlg = flet.AlertDialog(
         modal=True,
-        title=flet.Text("Set up a PIN"),
+        title=flet.Text(ctx.t("pin_setup_title")),
         content=flet.Column(
             [
                 flet.Text(
-                    "This PIN encrypts your private keys at rest and unlocks the app. "
-                    "Do not forget it: lost PINs cannot be recovered.",
+                    ctx.t("pin_setup_desc"),
                     size=12,
                 ),
                 tf1, tf2, err,
             ],
             tight=True,
         ),
-        actions=[flet.ElevatedButton("Set PIN", on_click=confirm)],
+        actions=[flet.ElevatedButton(ctx.t("pin_set_btn"), on_click=confirm)],
         actions_alignment=flet.MainAxisAlignment.END,
     )
     session["lock_dialog"] = dlg
@@ -184,7 +183,7 @@ async def show_unlock_dialog(ctx):
     page = ctx.page
     session = ctx.session
     tf = flet.TextField(
-        label="Enter PIN", password=True, can_reveal_password=True,
+        label=ctx.t("pin_enter"), password=True, can_reveal_password=True,
         keyboard_type=flet.KeyboardType.NUMBER, autofocus=True,
     )
     err = flet.Text("", color="red")
@@ -202,7 +201,7 @@ async def show_unlock_dialog(ctx):
             err.value = ""
             close_lock_dialog(ctx)
         else:
-            err.value = "Incorrect PIN."
+            err.value = ctx.t("pin_incorrect")
             page.update()
 
     async def forgot_pin(ev):
@@ -224,16 +223,12 @@ async def show_unlock_dialog(ctx):
 
         confirm_dlg = flet.AlertDialog(
             modal=True,
-            title=flet.Text("Reset everything?"),
-            content=flet.Text(
-                "This will permanently delete the PIN and ALL stored wallets "
-                "(their encrypted keys become unrecoverable). Only continue "
-                "if you have your seed phrases backed up."
-            ),
+            title=flet.Text(ctx.t("reset_everything_q")),
+            content=flet.Text(ctx.t("reset_everything_desc")),
             actions=[
-                flet.TextButton("Cancel", on_click=cancel),
+                flet.TextButton(ctx.t("cancel"), on_click=cancel),
                 flet.ElevatedButton(
-                    "Reset & Wipe", on_click=do_wipe, icon=flet.Icons.DELETE_FOREVER
+                    ctx.t("reset_wipe"), on_click=do_wipe, icon=flet.Icons.DELETE_FOREVER
                 ),
             ],
             actions_alignment=flet.MainAxisAlignment.END,
@@ -242,11 +237,11 @@ async def show_unlock_dialog(ctx):
 
     dlg = flet.AlertDialog(
         modal=True,
-        title=flet.Text("Enter PIN"),
+        title=flet.Text(ctx.t("pin_enter")),
         content=flet.Column([tf, err], tight=True),
         actions=[
-            flet.ElevatedButton("Unlock", on_click=do_unlock),
-            flet.TextButton("Forgot PIN?", on_click=forgot_pin),
+            flet.ElevatedButton(ctx.t("pin_unlock"), on_click=do_unlock),
+            flet.TextButton(ctx.t("pin_forgot"), on_click=forgot_pin),
         ],
         actions_alignment=flet.MainAxisAlignment.END,
     )
