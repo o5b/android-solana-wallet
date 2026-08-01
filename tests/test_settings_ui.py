@@ -153,6 +153,25 @@ def test_build_registers_controls():
     check("experience_desc is Text", isinstance(ctx.controls["experience_desc"], flet.Text))
 
 
+def test_language_dropdown_registered():
+    from ui.i18n import LANGS, ENGLISH
+    ctx = make_ctx()
+    settings_mod.build_settings_page(ctx)
+    check("language_dd registered", "language_dd" in ctx.controls)
+    lang_dd = ctx.controls["language_dd"]
+    check("language_dd is Dropdown", isinstance(lang_dd, flet.Dropdown))
+    # Options cover every language in LANGS (en + ru for Phase 1).
+    keys = [o.key for o in lang_dd.options]
+    check("language_dd options == LANGS", set(keys) == set(LANGS))
+    # Default value is the context language (English by default).
+    check("language_dd value == ctx.lang", lang_dd.value == ctx.lang)
+    check("language_dd default en", lang_dd.value == ENGLISH)
+    # The dropdown sits inside the View's control tree.
+    view = settings_mod.build_settings_page(make_ctx())
+    dropdowns = find_all(view, lambda c: isinstance(c, flet.Dropdown))
+    check(">=2 Dropdowns in view (experience + language)", len(dropdowns) >= 2)
+
+
 def test_initial_dropdown_value_simple():
     ctx = make_ctx()
     settings_mod.build_settings_page(ctx)
@@ -223,6 +242,22 @@ def test_settings_enter_missing_key_defaults_simple():
     check("missing key -> SIMPLE", ctx.controls["experience_dd"].value == SIMPLE)
 
 
+def test_settings_enter_syncs_language():
+    from ui.i18n import LANG_KEY, RUSSIAN, language_display_name
+    page = MockPage()
+    page.shared_preferences._values[LANG_KEY] = RUSSIAN
+    ctx = make_ctx(page)
+    settings_mod.build_settings_page(ctx)
+    check("ctx.lang default en pre-enter", ctx.lang == "en")
+    asyncio.run(settings_mod.settings_enter(ctx))
+    lang_dd = ctx.controls["language_dd"]
+    check("ctx.lang synced to ru", ctx.lang == RUSSIAN)
+    check("language_dd value ru", lang_dd.value == RUSSIAN)
+    # Option labels re-rendered in the selected language.
+    names = {o.key: o.text for o in lang_dd.options}
+    check("option ru label in ru", names[RUSSIAN] == language_display_name(RUSSIAN, RUSSIAN))
+
+
 # ============================ experience switch drive =======================
 
 def _drive_on_select(ctx):
@@ -281,12 +316,14 @@ def main():
     tests = [
         test_build_returns_view,
         test_build_registers_controls,
+        test_language_dropdown_registered,
         test_initial_dropdown_value_simple,
         test_theme_label_reflects_page_theme_mode,
         test_controls_present_in_view,
         test_settings_enter_reads_persisted_mode,
         test_settings_enter_unknown_mode_falls_back_to_simple,
         test_settings_enter_missing_key_defaults_simple,
+        test_settings_enter_syncs_language,
         test_switch_to_pro_persists_and_updates,
         test_dev_warning_flag_round_trip,
     ]

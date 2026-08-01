@@ -519,13 +519,13 @@ async def _dev_storage_delete_click(ctx: AppContext, key: str) -> None:
         print(f'Error deleted data from shared_preferences: {er}')
         page.show_dialog(
             flet.AlertDialog(
-                title=flet.Text("Во время удаления произошла ошибка!"),
+                title=flet.Text(ctx.t("del_err")),
             )
         )
     else:
         page.show_dialog(
             flet.AlertDialog(
-                title=flet.Text(f"{key} успешно удалён!"),
+                title=flet.Text(ctx.t("del_ok", key=key)),
             )
         )
     await dev_storage_enter(ctx)
@@ -590,7 +590,7 @@ def build_dev_storage_page(ctx: AppContext) -> flet.View:
         horizontal_alignment=flet.CrossAxisAlignment.CENTER,
         scroll=flet.ScrollMode.AUTO,
         controls=[
-            flet.Text(value='Редактирование client_storage:', size=20),
+            flet.Text(value=ctx.t("edit_client_storage"), size=20),
             ctx.controls["el_dev_storage_page"],
         ]
     )

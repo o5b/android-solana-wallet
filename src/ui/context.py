@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 import flet
 
 from solana.security import decrypt_wallet_secrets, encrypt_wallet_secrets, get_secret
+from ui.i18n import DEFAULT_LANG, t as _translate, tp as _translate_plural
 
 
 @dataclass
@@ -55,6 +56,7 @@ class AppContext:
     pin_verifier_key: str = "security.pin_verifier"
     auto_lock_seconds: int = 300
     controls: dict = field(default_factory=dict)
+    lang: str = DEFAULT_LANG  # UI language cache (read at bootstrap / on switch)
 
     # -- convenience accessors (mirror the helpers main.py closures used) ------
 
@@ -130,3 +132,26 @@ class AppContext:
         if not self.is_unlocked():
             return wallet
         return decrypt_wallet_secrets(wallet, self.session["key"])
+
+    # -- internationalization --------------------------------------------------
+
+    def t(self, msg_key: str, **fmt) -> str:
+        """Translate ``msg_key`` using the session language + interpolation.
+
+        ``ctx.lang`` is a cache read once at bootstrap (see :func:`ui.app.
+        build_app`) and updated when the user picks a language in Settings, so
+        call sites never need to thread ``page`` through. Mirrors
+        :func:`ui.i18n.t` with the session language bound.
+
+        The lookup-key param is ``msg_key`` (not ``key``) so the common
+        placeholder name ``key`` stays free for interpolation, e.g.
+        ``ctx.t("del_ok", key=storage_key)``.
+        """
+        return _translate(msg_key, self.lang, **fmt)
+
+    def tp(self, key_plural: str, key_singular: str, n: int, **fmt) -> str:
+        """Plural-aware translate using the session language.
+
+        Mirrors :func:`ui.i18n.tp` (RU: ``n%10==1 and n%100!=11`` -> singular).
+        """
+        return _translate_plural(key_plural, key_singular, n, self.lang, **fmt)

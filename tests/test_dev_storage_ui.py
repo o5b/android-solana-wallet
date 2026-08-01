@@ -19,12 +19,12 @@ Covers:
         second enter)
   * ``_dev_storage_delete_click(ctx, key)``:
       - success path: removes the key from ``shared_preferences`` + shows the
-        ``"{key} успешно удалён!"`` dialog (byte-identical to the legacy
-        closure) + rebuilds the list (the new latent-bug-fix behaviour)
+        ``ctx.t("del_ok", key=...)`` dialog (now localized — Phase 1 i18n; the
+        legacy Russian text is the ``ru`` translation) + rebuilds the list
       - error path: ``shared_preferences.remove`` raising → prints + shows the
-        ``"Во время удаления произошла ошибка!"`` dialog; key is NOT removed
-      - dialog strings preserved byte-identically from the legacy closure
-        (Russian text + the f-string interpolation).
+        ``ctx.t("del_err")`` dialog; key is NOT removed
+      - dialog strings are localized via :mod:`ui.i18n` (default test lang =
+        English; the Russian wording lives in the ``ru`` translation entry).
 
 Click wiring can't be asserted headlessly (flet registers handlers in an
 internal registry — see ``info/ui-testing-playbook.md`` §13), so the Delete
@@ -160,7 +160,7 @@ def test_build_binds_shared_column():
     # The header Text + the shared el_dev_storage_page column are in controls.
     texts = [c for c in view.controls if isinstance(c, flet.Text)]
     check("header text present",
-          any("Редактирование client_storage:" == t.value for t in texts))
+          any(t.value == ctx.t("edit_client_storage") for t in texts))
     check("el_dev_storage_page bound in view",
           ctx.controls["el_dev_storage_page"] in view.controls)
 
@@ -307,14 +307,15 @@ def test_delete_success_removes_and_dialog_and_refreshes():
           "wallet.1" not in page.shared_preferences._values)
     check("other keys untouched",
           "wallet.2" in page.shared_preferences._values)
-    # Success dialog shown with byte-identical Russian text
+    # Success dialog shown (localized: default lang = English).
     check("exactly 1 dialog shown", len(page.dialogs_shown) == 1)
     dlg = page.dialogs_shown[0]
     check("dialog is AlertDialog", isinstance(dlg, flet.AlertDialog))
-    # AlertDialog title Text value: "wallet.1 успешно удалён!"
+    # AlertDialog title Text value is the localized delete-success string
+    # (ctx default lang = English -> "wallet.1 deleted successfully!").
     title_val = dlg.title.value if isinstance(dlg.title, flet.Text) else None
-    check("success dialog text byte-identical",
-          title_val == "wallet.1 успешно удалён!")
+    check("success dialog text localized",
+          title_val == ctx.t("del_ok", key="wallet.1"))
     # List refreshed (latent-bug-fix): only 1 row remains
     lv = ctx.controls["el_dev_storage_page"].controls[0]
     rows = [c for c in lv.controls if isinstance(c, flet.Row)]
@@ -340,12 +341,12 @@ def test_delete_error_dialog_and_key_preserved(capsys=None):
           "Error deleted data from shared_preferences" in buf.getvalue())
     # Key NOT removed (the raise short-circuits the deletion)
     check("key preserved on error", "wallet.1" in page.shared_preferences._values)
-    # Error dialog with byte-identical Russian text
+    # Error dialog (localized: default lang = English).
     check("exactly 1 dialog shown", len(page.dialogs_shown) == 1)
     dlg = page.dialogs_shown[0]
     title_val = dlg.title.value if isinstance(dlg.title, flet.Text) else None
-    check("error dialog text byte-identical",
-          title_val == "Во время удаления произошла ошибка!")
+    check("error dialog text localized",
+          title_val == ctx.t("del_err"))
     # List refreshed (re-enter still runs after error so user sees current state)
     lv = ctx.controls["el_dev_storage_page"].controls[0]
     rows = [c for c in lv.controls if isinstance(c, flet.Row)]

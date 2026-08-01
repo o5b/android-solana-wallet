@@ -2305,7 +2305,112 @@ gitignored/working-tree. UI/business layer untouched.
   `.gitignore` (+ this AGENTS.md entry). `release.keystore` / `android-signing.txt`
   are gitignored. **Not committed** — the user has not requested a commit.
 
-## Security reminders
+### Session 2026-08-01 (i18n — Фаза 1: Фундамент)
+
+First phase of the **multilingual (i18n)** plan (`info/01-08-2026_i18n.md`, gitignored —
+**this entry is the durable reference**). Adds switchable **English + Русский** with
+infrastructure into which new languages are added with one edit. The `solana/` business
+layer is untouched — pure UI concern. UI-only changes across `src/ui/`. Plan: 5 phases;
+this is **Phase 1 (foundation, low risk)** — app works exactly as before, plus a
+`ctx.t()` translator, a Settings Language dropdown, and the 3 legacy Russian hardcodes
+in devtools localized to both languages.
+
+- **NEW** `src/ui/i18n.py` (pure Python, **0 dependencies** — safe for the APK build):
+  language registry + translation lookup, modelled exactly on `ui.experience.py`
+  (constants + async `get`/`set` pair). Surface:
+  - `LANGS = (ENGLISH, RUSSIAN)`, `DEFAULT_LANG = "en"`, `LANG_KEY = "ui.lang"`.
+  - `TRANSLATIONS: dict[str, dict[str, str]]` — key → {lang: text}. Phase 1 ships
+    ~25 keys: common (`save`/`cancel`/`copy`/`delete`/…), homepage (`app_title`/
+    `wallets_label`/`new_wallet`/… — defined now, migrated in Phase 2), settings
+    (`theme_light`/`appearance`/`language`/…), the 3 devtools keys
+    (`edit_client_storage`/`del_ok`/`del_err`), and one plural pair
+    (`spam_hidden_sg`/`spam_hidden_pl`) so the plural rule is testable now.
+  - `t(msg_key, lang=None, **fmt)` — **missing key → returns the key** (fail-loud,
+    visible in UI during dev); missing lang → English fallback → key; `str.format`
+    interpolation. **The lookup-key param is named `msg_key` (NOT `key`)** so the
+    common placeholder name `key` stays free for interpolation — e.g.
+    `ctx.t("del_ok", key=storage_key)` (here `key` is a `{key}` template placeholder,
+    the deleted storage key).
+  - `tp(key_plural, key_singular, n, lang=None, **fmt)` — plural-aware translate.
+    Simple RU rule: `n%10==1 and n%100!=11` → singular, else plural; EN always plural.
+    `n` is injected into the format kwargs (template `{n}` placeholder).
+  - `normalize`/`available_languages`/`language_display_name(lang, in_lang)` — the
+    dropdown shows each language's name in the currently-selected UI language
+    ("Русский" when UI is RU, "Russian" when EN). An unknown `lang` code surfaces
+    verbatim; only `in_lang` is normalized.
+  - `get_lang(page)`/`set_lang(page, lang)` — async shared_preferences read/write,
+    **never raise** (corrupt storage → default English).
+- **EXTENDED** `AppContext` (`src/ui/context.py`): added `lang: str = DEFAULT_LANG`
+  field (the in-memory language cache) + `ctx.t(msg_key, **fmt)` / `ctx.tp(...)`
+  methods (mirror `ui.i18n.t`/`tp` bound to `self.lang`). `ctx.lang` is read once at
+  bootstrap and updated by the Settings dropdown, so call sites never thread `page`
+  through. Imports `t`/`tp` from `ui.i18n` (no import cycle — `i18n.py` depends on
+  nothing in `ui`).
+- **CHANGED** `src/ui/app.py` (`build_app`): reads `ctx.lang = await get_lang(page)`
+  right after `ctx` creation (same spot as `theme_mode`/`experience` reads), before
+  any view is built.
+- **NEW Settings Language dropdown** (`src/ui/components/settings.py`): a `language_dd`
+  `flet.Dropdown` (uses `on_select`, same as `experience_dd`) added to the Appearance
+  card (grouped with the theme switch). `_on_language_select` → `ctx.lang =
+  await set_lang(page, language_dd.value)` + re-renders the option labels in the new
+  language + `page.update()` (live switch). `language_dd` registered in
+  `ctx.controls["language_dd"]`; `settings_enter(ctx)` now ALSO syncs the language
+  cache + dropdown (value/options/label) to the persisted value on each visit, so the
+  dropdown reflects storage state set via localStorage / a fresh bootstrap.
+- **MIGRATED** the 3 legacy Russian hardcodes in `src/ui/components/devtools.py` from
+  Russian-only literals to localized `ctx.t(...)` keys: `edit_client_storage` (the
+  Storage-inspector header), `del_ok`/`del_err` (the delete success/error dialogs).
+  They were the only Russian strings in the codebase; they are now `en`+`ru`. The
+  `del_ok` template uses a `{key}` placeholder (`ctx.t("del_ok", key=storage_key)`).
+- **Migration-contract rules (i18n, apply to every future phase)**:
+  1. **Translation → `ctx.t(msg_key, **fmt)`** (never hardcode user-facing text in a
+     `flet.Text/Button(...)`). `msg_key` is a stable snake_case id, NOT the English text.
+  2. **Lookup-key param is `msg_key`, not `key`** — keeps `key` free as a template
+     placeholder.
+  3. **Plurals → `ctx.tp(key_plural, key_singular, n)`** (e.g. the WC "N unverified
+     program(s)" / balance spam-banner — Phases 2/4).
+  4. **NEVER translate**: routes (`"-page"`), `shared_preferences` keys (`"ui."`/`wc.`),
+     icon/enum names, debug `print(...)` logs, addresses/sigs, ISO-8601 dates, currency
+     formatting (`fmt_usd`/`fmt_change` in `solana/prices.py`), `short_addr(...)`.
+  5. **Live switch → update `ctx.lang` + call the route's `*_enter(ctx)` rebuild hook**
+     (every page already has one); `settings_enter` now also refreshes `language_dd`.
+- **INVARIANTS preserved**: `homepage.controls[-1]` still the wallets list; all Views
+  built once at bootstrap at the same code location; `route_change` branches unchanged;
+  `solana/` untouched; per-session state isolation preserved (no module-level mutable
+  state); the 3 migrated devtools strings render English by default (test ctx lang=en)
+  and Russian when `ctx.lang="ru"`.
+- **Key symbols** (`src/ui/i18n.py`): `LANGS`/`DEFAULT_LANG`/`LANG_KEY`/`TRANSLATIONS`/
+  `LANGUAGE_NAMES`/`t`/`tp`/`normalize`/`language_display_name`/`get_lang`/`set_lang`.
+  (`src/ui/context.py`): `AppContext.lang`/`ctx.t`/`ctx.tp`. (`src/ui/app.py`):
+  `ctx.lang = await get_lang(page)`. (`src/ui/components/settings.py`): `language_dd`/
+  `_on_language_select`/`_refresh_language_dd` + `settings_enter` lang-sync.
+  (`src/ui/components/devtools.py`): `ctx.t("edit_client_storage")`/`ctx.t("del_ok",…)`/
+  `ctx.t("del_err")`.
+- **VERIFIED**: `py_compile` on all 5 files (`i18n.py` + `context.py` + `app.py` +
+  `settings.py` + `devtools.py`); `git diff --check` clean. **NEW** `tests/test_i18n.py`
+  (**57 checks**): `t()` contracts (en/ru/fallback/default/missing-key fail-loud),
+  interpolation, `tp()` plural rule (RU sg 1/21/101, RU pl 2/5/11, EN always pl),
+  `normalize`/`available_languages`/`language_display_name`, `get_lang`/`set_lang`
+  round-trip + never-raises on corrupt storage, `ctx.t`/`ctx.tp` bound to `ctx.lang`,
+  completeness (every key has both `en`+`ru`). Updated `tests/test_settings_ui.py`
+  (26→**36 checks**: language dropdown registered + 2 options + value=ctx.lang;
+  `settings_enter` syncs language cache + re-renders option labels in the selected
+  language). Updated `tests/test_dev_storage_ui.py` (3 text assertions updated from the
+  legacy Russian literals to the localized `ctx.t(...)` output, default test lang=en).
+  All 17 existing suites green (~600 checks). End-to-end via Playwright (web mode, PIN
+  `1234`): app **boots clean, 0 console errors**; Settings Appearance card shows the
+  Language dropdown; `ui.lang` set via JSON-encoded localStorage + a **new tab** (in-memory
+  `shared_preferences` cache survives same-tab reload — playbook §7) persists + is read
+  back; the **RU build path proven headlessly** (CanvasKit hides rendered Text from DOM —
+  playbook §12; the same code the new-tab bootstrap ran): `language_dd.label='Язык'`,
+  options `('en','Английский')`/`('ru','Русский')`, storage title
+  `'Редактирование client_storage:'`; EN path: `label='Language'`/`'Edit client_storage:'`.
+- **NOT committed** (user has not requested a commit). Working tree: `src/ui/i18n.py`
+  (new), `src/ui/context.py`, `src/ui/app.py`, `src/ui/components/settings.py`,
+  `src/ui/components/devtools.py`, `tests/test_i18n.py` (new), `tests/test_settings_ui.py`,
+  `tests/test_dev_storage_ui.py` (+ this AGENTS.md entry).
+
+
 
 - Private keys and mnemonics are stored **encrypted at rest** (Fernet) once a PIN is set;
   they are decrypted into memory only while the app is unlocked. Never log, print, or copy

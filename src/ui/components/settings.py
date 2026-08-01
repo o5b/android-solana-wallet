@@ -38,6 +38,12 @@ from ui.experience import (
     mark_dev_warning_seen,
     set_experience,
 )
+from ui.i18n import (
+    LANGS,
+    get_lang,
+    language_display_name,
+    set_lang,
+)
 
 
 def build_settings_page(ctx: AppContext) -> flet.View:
@@ -162,10 +168,40 @@ def build_settings_page(ctx: AppContext) -> flet.View:
         experience_description(SIMPLE), size=11, color=flet.Colors.GREY_700,
     )
 
+    # ---- Language selector (en / ru) --------------------------------------
+    # Persisted in shared_preferences under ``ui.lang`` (same pattern as
+    # ``ui.experience``). ``ctx.lang`` is the in-memory cache every ``ctx.t(...)``
+    # reads, so the switch is live once ``ctx.lang`` is updated here; the
+    # option labels are re-rendered in the newly-selected language too.
+    async def _on_language_select(e):
+        ctx.lang = await set_lang(page, language_dd.value)
+        _refresh_language_dd()
+        page.update()
+
+    def _refresh_language_dd():
+        language_dd.options = [
+            flet.dropdown.Option(key=lg, text=language_display_name(lg, ctx.lang))
+            for lg in LANGS
+        ]
+        language_dd.value = ctx.lang
+        language_dd.label = ctx.t("language")
+
+    language_dd = flet.Dropdown(
+        label=ctx.t("language"),
+        options=[
+            flet.dropdown.Option(key=lg, text=language_display_name(lg, ctx.lang))
+            for lg in LANGS
+        ],
+        value=ctx.lang,
+        dense=True,
+        on_select=_on_language_select,
+    )
+
     # Register the long-lived controls so settings_enter can read them back.
     ctx.controls["theme_control"] = theme_control
     ctx.controls["experience_dd"] = experience_dd
     ctx.controls["experience_desc"] = experience_desc
+    ctx.controls["language_dd"] = language_dd
 
     return flet.View(
         route="settings-page",
@@ -188,6 +224,17 @@ def build_settings_page(ctx: AppContext) -> flet.View:
                             width=440,
                             content=flet.Row(
                                 [flet.Icon(flet.Icons.PALETTE_OUTLINED), theme_control],
+                                alignment=flet.MainAxisAlignment.SPACE_BETWEEN,
+                            ),
+                        )
+                    ),
+                    flet.Container(height=4),
+                    flet.Card(
+                        content=flet.Container(
+                            padding=12,
+                            width=440,
+                            content=flet.Row(
+                                [flet.Icon(flet.Icons.LANGUAGE_OUTLINED), language_dd],
                                 alignment=flet.MainAxisAlignment.SPACE_BETWEEN,
                             ),
                         )
@@ -239,14 +286,25 @@ def build_settings_page(ctx: AppContext) -> flet.View:
 
 
 async def settings_enter(ctx: AppContext) -> None:
-    """Read the persisted experience level into the Settings selector.
+    """Read the persisted experience level + language into the Settings selectors.
 
     Mirrors the ``enter`` hooks (``wc_enter`` / ``rawkey_enter`` /
     ``addressbook_enter``): called from ``route_change`` on each visit to the
-    settings page so the dropdown reflects the current storage state (which may
-    have changed since bootstrap, e.g. after a Dev-mode warning revert).
+    settings page so the dropdowns reflect the current storage state (which may
+    have changed since bootstrap, e.g. after a Dev-mode warning revert or a
+    language set via localStorage / a fresh bootstrap).
     """
     page = ctx.page
     mode = await get_experience(page)
     ctx.controls["experience_dd"].value = mode
     ctx.controls["experience_desc"].value = experience_description(mode)
+    # Sync the language cache + dropdown to the persisted value.
+    ctx.lang = await get_lang(page)
+    language_dd = ctx.controls["language_dd"]
+    language_dd.options = [
+        flet.dropdown.Option(key=lg, text=language_display_name(lg, ctx.lang))
+        for lg in LANGS
+    ]
+    language_dd.value = ctx.lang
+    language_dd.label = ctx.t("language")
+    page.update()

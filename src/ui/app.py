@@ -52,6 +52,7 @@ import time
 import flet
 
 from ui.context import AppContext
+from ui.i18n import get_lang
 from ui.security_gate import auto_lock_watcher, refresh_lock_state
 from ui.components.addressbook import addressbook_enter, build_addressbook_page
 from ui.components.balance import build_address_page, get_wallets_cards
@@ -125,6 +126,10 @@ async def build_app(page: flet.Page) -> None:
         pin_verifier_key=PIN_VERIFIER_KEY,
         auto_lock_seconds=AUTO_LOCK_SECONDS,
     )
+    # UI language cache: read once here, then kept in sync by the Settings
+    # dropdown's on_select. Every ctx.t(...) call reads this field, so a
+    # language switch never needs to thread ``page`` through call sites.
+    ctx.lang = await get_lang(page)
     # The CSV file picker is used by the Developer-mode "Save History as CSV"
     # button (history handler in ui/components/balance.py). It must be appended
     # to ``page.services`` (above) for the picker to actually render; exposed
