@@ -422,8 +422,8 @@ in 5 phases; each phase = one commit, all 18 offline suites stay green.
 |---|---|---|
 | 1 — Foundation | `i18n.py` + `ctx.t`/`ctx.tp` + Settings language dropdown + devtools ru-hardcodes | ✅ `c344207` |
 | 2 — Visible screens | `app.py` + `balance.py` + `more.py` | ✅ `21b6213` |
-| 3 — Transfers + address book | `transfer.py` + `wallet_create.py` + `addressbook.py` + `security_gate.py` | ⬜ NEXT |
-| 4 — WEB3 tools | `walletconnect.py` + `nft.py` + `staking.py` + `swap.py` + `priority_fee.py` | ⬜ |
+| 3 — Transfers + address book | `transfer.py` + `wallet_create.py` + `addressbook.py` + `security_gate.py` | ✅ `7e81ad6` |
+| 4 — WEB3 tools | `walletconnect.py` + `nft.py` + `staking.py` + `swap.py` + `priority_fee.py` | ⬜ NEXT |
 | 5 — Finalize ru + AST audit | complete ru locale, plural audit, `find_translatable_strings()` = 0, Playwright EN+RU | ⬜ |
 
 **Resume checklist:** confirm baseline (`tests/test_app_ui.py` + `tests/test_i18n.py`),
@@ -436,6 +436,34 @@ stays a free interpolation placeholder (§9); the `spam_hidden_sg/pl` pair is te
 and must not change — a separate `spam_hidden_click_*` pair was added for the real UI
 string; intentionally untranslated per §7.1: the `Solana` brand, the `dev` badge,
 currency units (`SOL`), addresses/signatures, and on-chain logs (`f"• {log}"`).
+
+**Phase-3 decisions to carry forward:** reused existing keys where the EN literal
+already matched (`save`/`cancel`/`copy`/`delete`/`please_wait`/`information`/
+`recover_wallet`/`add_wallet_address`); the headless tests run with `ctx.lang="en"`
+(default `AppContext.lang`), so any EN value asserted by a test MUST reproduce the
+old literal byte-for-byte — `find_textfield`/`find_button` do exact/substring
+matching (e.g. `"Create a PIN (4+ digits)"` ← `pin_create` with `n=4`,
+`"Inspect on Solscan"`, `"Wallet Name"`, `"Add Wallet Address (base58) "` **with the
+trailing space**, `"Enter PIN"`, `"Confirm PIN"`, `"Set PIN"`, `"Unlock"`,
+`"PINs do not match."`, `"Incorrect PIN."`). The `_build_spl_token_detail` Pro
+summary (`'Token:'/'Amount:'/'Decimals:'/'USD value'`) + Dev raw key/value dump
+are **deliberately left untranslated** — they are a technical/diagnostic panel
+(`test_transfer_ui` locks `"USD value"`), mirroring the `dev`/Pro technical
+output convention. Debug `print(...)` logs in `transfer.py` (`[SWAP]`/`[WC]`/
+`DEBUG`/`go_to_*_button_click`) are untouched (§7.1). Address-poisoning *reason*
+strings from `solana.address_check` are business-layer output, so only the UI
+prefix is translated (`poison_danger`/`poison_caution`) with `{reasons}` as an
+interpolation value. No `tp()` calls needed in Phase 3 (no new plurals).
+
+**Phase-3 review fixes (applied before commit):** the SOL key-derivation error
+dialogs (`sol_key_error_attempts`/`sol_key_failed` in `transfer.py`) previously
+interpolated `{secret}` = the user's seed phrase / private key into the AlertDialog
+title — a pre-existing on-screen secret leak that the migration codified. The
+`{secret}` placeholder + `secret=input_secret` kwarg were removed (kept only
+`{attempts}`/`{err}`); EN/RU no longer render wallet-recovery material. Two
+near-duplicate keys were collapsed into existing ones instead of minting new copies:
+`ab_title` → reuse `hub_address_book` (both "Address Book"); `lbl_address` → reuse
+`address_label` (both "Address: ").
 
 ## Android APK build + release signing
 
