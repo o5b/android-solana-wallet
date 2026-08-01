@@ -67,9 +67,9 @@ async def make_priority_fee_block(
     def _refresh():
         ul = state['micro_lamports']
         if ul <= 0:
-            estimate_txt.value = "Priority fee: Auto (no priority fee)"
+            estimate_txt.value = ctx.t("pf_estimate_auto")
         else:
-            estimate_txt.value = f"Priority fee: {ul:,} µLamports/CU → ≈ {_sol(ul)} SOL"
+            estimate_txt.value = ctx.t("pf_estimate_amount", ul=ul, sol=_sol(ul))
         ctx.safe_update()
 
     def _set(ul: int):
@@ -114,18 +114,18 @@ async def make_priority_fee_block(
     custom_tf.on_change = _on_custom_change
 
     preset_buttons = [
-        flet.ElevatedButton("Auto", on_click=_preset(0)),
-        flet.ElevatedButton("Low", on_click=_preset(levels['low'])),
-        flet.ElevatedButton("Medium", on_click=_preset(levels['medium'])),
-        flet.ElevatedButton("High", on_click=_preset(levels['high'])),
+        flet.ElevatedButton(ctx.t("pf_auto"), on_click=_preset(0)),
+        flet.ElevatedButton(ctx.t("pf_low"), on_click=_preset(levels['low'])),
+        flet.ElevatedButton(ctx.t("pf_medium"), on_click=_preset(levels['medium'])),
+        flet.ElevatedButton(ctx.t("pf_high"), on_click=_preset(levels['high'])),
     ]
     if allow_custom:
-        preset_buttons.append(flet.ElevatedButton("Custom", on_click=_custom))
+        preset_buttons.append(flet.ElevatedButton(ctx.t("pf_custom"), on_click=_custom))
 
     presets = flet.Row(preset_buttons, wrap=True)
 
     block_controls = [
-        flet.Text("Priority fee (lands faster when the network is busy)", size=13, weight=flet.FontWeight.BOLD),
+        flet.Text(ctx.t("pf_title"), size=13, weight=flet.FontWeight.BOLD),
         presets,
     ]
     if allow_custom:

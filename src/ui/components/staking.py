@@ -58,27 +58,27 @@ async def lst_enter(ctx: AppContext) -> None:
     wallets = await load_wallets(ctx)
     if not wallets:
         el_lst_page.controls.append(
-            flet.Text("No wallets yet. Add a wallet first to use liquid staking.", size=14, color=flet.Colors.GREY_600)
+            flet.Text(ctx.t("lst_no_wallets"), size=14, color=flet.Colors.GREY_600)
         )
         page.update()
         return
 
     wallets_by_addr = {w['address_base58']: w for w in wallets}
     wallet_dd = flet.Dropdown(
-        label="Wallet", width=420,
+        label=ctx.t("wallet_dd_label"), width=420,
         options=[flet.dropdown.Option(
             key=w['address_base58'],
-            text=f"{w.get('name', 'Wallet')} · {short_addr(w['address_base58'])}",
+            text=f"{w.get('name') or ctx.t('wallet_dd_label')} · {short_addr(w['address_base58'])}",
         ) for w in wallets],
         value=wallets[0]['address_base58'],
     )
     lst_dd = flet.Dropdown(
-        label="Stake into", width=260,
+        label=ctx.t("stake_into"), width=260,
         options=[flet.dropdown.Option(key=sym, text=f"{sym} · {info[2]}") for sym, info in LST_TOKENS.items()],
         value="JitoSOL",
     )
-    tf_amount = flet.TextField(label="Amount (SOL)", width=160, max_length=30)
-    tf_slippage = flet.TextField(label="Slippage %", value="1.0", width=100, max_length=6)
+    tf_amount = flet.TextField(label=ctx.t("amount_sol_short"), width=160, max_length=30)
+    tf_slippage = flet.TextField(label=ctx.t("slippage_pct"), value="1.0", width=100, max_length=6)
     txt_quote = flet.Text(selectable=True, text_align=flet.TextAlign.CENTER)
     quote_holder: dict = {"quote": None, "amount_str": None, "lst_sym": None, "slippage_bps": None}
     positions_holder = flet.Column()
@@ -97,23 +97,24 @@ async def lst_enter(ctx: AppContext) -> None:
         try:
             amount_str = (tf_amount.value or "").strip()
             if not is_valid_amount(amount_str):
-                txt_quote.value = "Invalid amount."
+                txt_quote.value = ctx.t("invalid_amount_short")
                 el_lst_page.update(); return
             slippage_bps = _slippage_bps()
-            txt_quote.value = "Fetching quote..."
+            txt_quote.value = ctx.t("fetching_quote")
             el_lst_page.update()
             q = await lst_get_quote(lst_dd.value, amount_str, slippage_bps=slippage_bps)
             rate = q["sol_per_lst"]
-            rate_txt = f"  (1 {lst_dd.value} ≈ {rate:.4f} SOL — accumulated yield)" if rate else ""
+            rate_txt = ctx.t("lst_rate", sym=lst_dd.value, rate=f"{rate:.4f}") if rate else ""
             txt_quote.value = (
                 f"{amount_str} SOL -> {q['out_amount_lst']:.8f} {lst_dd.value}\n"
-                f"Min received (with slippage): {q['min_out_lst']:.8f} {lst_dd.value}\n"
-                f"Price impact: {q['price_impact_pct']:.3f}%"
-                f"{rate_txt}"
+                + ctx.t("min_received", amount=f"{q['min_out_lst']:.8f}", sym=lst_dd.value)
+                + "\n"
+                + ctx.t("price_impact", pct=f"{q['price_impact_pct']:.3f}")
+                + rate_txt
             )
             quote_holder.update({"quote": q, "amount_str": amount_str, "lst_sym": lst_dd.value, "slippage_bps": slippage_bps})
         except Exception as er:
-            txt_quote.value = f"Quote error: {er}"
+            txt_quote.value = ctx.t("quote_error", err=er)
         el_lst_page.update()
 
     async def _stake_click(ev):
@@ -121,15 +122,15 @@ async def lst_enter(ctx: AppContext) -> None:
             addr = wallet_dd.value
             wallet = wallets_by_addr.get(addr)
             if not ctx.has_wallet_private_key(wallet):
-                txt_quote.value = "Staking needs the wallet's private key. Unlock the wallet or recover it with its secret."
+                txt_quote.value = ctx.t("stake_needs_key")
                 el_lst_page.update(); return
             if (tf_amount.value or "").strip() != (quote_holder.get("amount_str") or "") \
                     or lst_dd.value != quote_holder.get("lst_sym") \
                     or _slippage_bps() != quote_holder.get("slippage_bps"):
-                txt_quote.value = "Inputs changed. Press Get Quote again, then Stake SOL."
+                txt_quote.value = ctx.t("stake_inputs_changed")
                 el_lst_page.update(); return
             ev.control.disabled = True
-            txt_quote.value = "Staking... please wait"
+            txt_quote.value = ctx.t("staking_wait")
             el_lst_page.update()
             res = await lst_stake(
                 lst_symbol=lst_dd.value,
@@ -142,14 +143,14 @@ async def lst_enter(ctx: AppContext) -> None:
             conf = res.get("confirmation", {}).get("result", {}).get("value", [{}])[0]
             status = conf.get("confirmationStatus") if conf else "unknown"
             if conf and conf.get("err"):
-                txt_quote.value = f"Stake FAILED: {conf['err']}\nsignature: {res['signature']}"
+                txt_quote.value = ctx.t("stake_failed", err=conf['err'], sig=res['signature'])
             else:
                 out = res.get("out_amount_lst")
-                out_txt = f"\nReceived ~{out:.8f} {lst_dd.value}" if out else ""
-                txt_quote.value = f"Stake SUCCESS ({status})!{out_txt}\nsignature: {res['signature']}"
+                received = ctx.t("stake_received", amount=f"{out:.8f}", sym=lst_dd.value) if out else ""
+                txt_quote.value = ctx.t("stake_success", status=status, received=received, sig=res['signature'])
             await _refresh_positions()
         except Exception as er:
-            txt_quote.value = f"Stake error: {er}"
+            txt_quote.value = ctx.t("stake_error", err=er)
         finally:
             ev.control.disabled = False
             el_lst_page.update()
@@ -160,20 +161,20 @@ async def lst_enter(ctx: AppContext) -> None:
             return
         positions_holder.controls.clear()
         positions_holder.controls.append(
-            flet.Row([flet.ProgressRing(), flet.Text("Loading positions...")], alignment=flet.MainAxisAlignment.CENTER)
+            flet.Row([flet.ProgressRing(), flet.Text(ctx.t("loading_positions"))], alignment=flet.MainAxisAlignment.CENTER)
         )
         el_lst_page.update()
         try:
             pos = await lst_positions(addr, network=_MAINNET)
         except Exception as er:
             positions_holder.controls.clear()
-            positions_holder.controls.append(flet.Text(f"Error loading positions: {er}", size=13, color=flet.Colors.RED_400))
+            positions_holder.controls.append(flet.Text(ctx.t("err_loading_positions", err=er), size=13, color=flet.Colors.RED_400))
             el_lst_page.update(); return
         positions_holder.controls.clear()
         positions = pos.get("positions", [])
         if not positions:
             positions_holder.controls.append(
-                flet.Text("No liquid-staking positions yet for this wallet.", size=13, color=flet.Colors.GREY_600)
+                flet.Text(ctx.t("lst_no_positions"), size=13, color=flet.Colors.GREY_600)
             )
             el_lst_page.update(); return
 
@@ -183,18 +184,18 @@ async def lst_enter(ctx: AppContext) -> None:
             rate = p.get("sol_per_lst")
             usd = fmt_usd(p.get("usd_value")) if p.get("usd_value") is not None else ""
             rate_txt = f"  ·  1 {p['symbol']} ≈ {rate:.4f} SOL" if rate else ""
-            tf_unstake = flet.TextField(label=f"Unstake {p['symbol']}", width=140, max_length=30)
+            tf_unstake = flet.TextField(label=ctx.t("unstake_field", sym=p['symbol']), width=140, max_length=30)
 
             async def _unstake(ev, sym=p["symbol"], fld=tf_unstake):
                 try:
                     amt = (fld.value or "").strip()
                     if not is_valid_amount(amt):
-                        status_txt.value = f"Invalid {sym} amount."; el_lst_page.update(); return
+                        status_txt.value = ctx.t("invalid_sym_amount", sym=sym); el_lst_page.update(); return
                     if not (wallets_by_addr.get(wallet_dd.value) and ctx.has_wallet_private_key(wallets_by_addr[wallet_dd.value])):
-                        status_txt.value = "Unstake needs the wallet's private key. Unlock or recover the wallet."
+                        status_txt.value = ctx.t("unstake_needs_key")
                         el_lst_page.update(); return
                     ev.control.disabled = True
-                    status_txt.value = f"Unstaking {amt} {sym}..."
+                    status_txt.value = ctx.t("unstaking_wait", amt=amt, sym=sym)
                     el_lst_page.update()
                     res = await lst_unstake(
                         lst_symbol=sym, amount_lst=amt,
@@ -204,14 +205,14 @@ async def lst_enter(ctx: AppContext) -> None:
                     )
                     conf = res.get("confirmation", {}).get("result", {}).get("value", [{}])[0]
                     if conf and conf.get("err"):
-                        status_txt.value = f"Unstake FAILED: {conf['err']}\n{res['signature']}"
+                        status_txt.value = ctx.t("unstake_failed", err=conf['err'], sig=res['signature'])
                     else:
                         out = res.get("out_amount_sol")
-                        otxt = f" (~{out:.6f} SOL)" if out else ""
-                        status_txt.value = f"Unstake SUCCESS{otxt}\n{res['signature']}"
+                        received = ctx.t("unstake_received", amount=f"{out:.6f}") if out else ""
+                        status_txt.value = ctx.t("unstake_success", received=received, sig=res['signature'])
                     await _refresh_positions()
                 except Exception as er:
-                    status_txt.value = f"Unstake error: {er}"
+                    status_txt.value = ctx.t("unstake_error", err=er)
                 finally:
                     ev.control.disabled = False
                     el_lst_page.update()
@@ -219,23 +220,21 @@ async def lst_enter(ctx: AppContext) -> None:
             positions_holder.controls.append(flet.Row([
                 flet.Column([
                     flet.Text(f"{p['amount']:.6f} {p['symbol']}  ({p['provider']})", weight=flet.FontWeight.BOLD),
-                    flet.Text(f"Value {usd}{rate_txt}", size=12, selectable=True),
+                    flet.Text(ctx.t("lst_value", usd=usd, rate=rate_txt), size=12, selectable=True),
                 ]),
                 tf_unstake,
-                flet.ElevatedButton("Unstake", on_click=_unstake, disabled=not has_key),
+                flet.ElevatedButton(ctx.t("unstake_btn"), on_click=_unstake, disabled=not has_key),
             ], alignment=flet.MainAxisAlignment.SPACE_BETWEEN, wrap=True))
         el_lst_page.update()
 
-    quote_btn = flet.ElevatedButton("Get Quote", on_click=_quote_click)
-    stake_btn = flet.ElevatedButton("Stake SOL", on_click=_stake_click)
-    refresh_btn = flet.ElevatedButton("Refresh Positions", icon=flet.Icons.REFRESH, on_click=lambda ev: asyncio.ensure_future(_refresh_positions()))
+    quote_btn = flet.ElevatedButton(ctx.t("get_quote"), on_click=_quote_click)
+    stake_btn = flet.ElevatedButton(ctx.t("stake_sol_btn"), on_click=_stake_click)
+    refresh_btn = flet.ElevatedButton(ctx.t("refresh_positions"), icon=flet.Icons.REFRESH, on_click=lambda ev: asyncio.ensure_future(_refresh_positions()))
 
     el_lst_page.controls.extend([
-        flet.Text("Liquid Staking", size=16, weight=flet.FontWeight.BOLD),
+        flet.Text(ctx.t("lst_heading"), size=16, weight=flet.FontWeight.BOLD),
         flet.Text(
-            "Stake SOL into a Liquid Staking Token via Jupiter. The token gains value "
-            "against SOL over time — that growth is your yield. Unstake = swap back to SOL. "
-            "Mainnet only.",
+            ctx.t("lst_intro"),
             size=12, color=flet.Colors.GREY_700, text_align=flet.TextAlign.CENTER,
         ),
         flet.Row([wallet_dd], alignment=flet.MainAxisAlignment.CENTER),
@@ -266,7 +265,7 @@ def build_staking_page(ctx: AppContext) -> flet.View:
     return flet.View(
         route="stake-page",
         appbar=flet.AppBar(
-            title=flet.Text("Liquid Staking"),
+            title=flet.Text(ctx.t("lst_appbar_title")),
             color="white",
             bgcolor="#0d9488",
             leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
@@ -275,7 +274,7 @@ def build_staking_page(ctx: AppContext) -> flet.View:
         horizontal_alignment=flet.CrossAxisAlignment.CENTER,
         scroll=flet.ScrollMode.AUTO,
         controls=[
-            flet.Text('Liquid Staking', size=30, font_family="Georgia"),
+            flet.Text(ctx.t("lst_heading"), size=30, font_family="Georgia"),
             ctx.controls["el_lst_page"],
-        ],
+        ]
     )

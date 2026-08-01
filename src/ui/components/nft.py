@@ -45,7 +45,7 @@ def _network_tag(network: str) -> str:
     return "mainnet" if network else ""
 
 
-def _nft_tile(nft: dict, wallet: dict, on_click) -> flet.TextButton:
+def _nft_tile(ctx: AppContext, nft: dict, wallet: dict, on_click) -> flet.TextButton:
     """A single clickable NFT thumbnail used in the gallery grid (pure builder).
 
     ``on_click`` is the bound detail-dialog handler (:func:`nft_enter` supplies
@@ -66,7 +66,7 @@ def _nft_tile(nft: dict, wallet: dict, on_click) -> flet.TextButton:
                         border_radius=flet.border_radius.all(8),
                     ),
                     flet.Text(
-                        nft.get('name', 'Unnamed NFT'),
+                        nft.get('name') or ctx.t('unnamed_nft'),
                         size=12, weight=flet.FontWeight.BOLD,
                         max_lines=1, overflow=flet.TextOverflow.ELLIPSIS,
                         text_align=flet.TextAlign.CENTER,
@@ -106,19 +106,19 @@ async def nft_enter(ctx: AppContext, open_spl_page) -> None:
     wallets = await load_wallets(ctx)
     if not wallets:
         el_nft_page.controls.append(
-            flet.Text("No wallets yet. Add a wallet first to view its NFTs.", size=14, color=flet.Colors.GREY_600)
+            flet.Text(ctx.t("nft_no_wallets"), size=14, color=flet.Colors.GREY_600)
         )
         page.update()
         return
 
     wallets_by_addr = {w['address_base58']: w for w in wallets}
     wallet_dd = flet.Dropdown(
-        label="Wallet",
+        label=ctx.t("wallet_dd_label"),
         width=420,
         options=[
             flet.dropdown.Option(
                 key=w['address_base58'],
-                text=f"{w.get('name', 'Wallet')} · {short_addr(w['address_base58'])}",
+                text=f"{w.get('name') or ctx.t('wallet_dd_label')} · {short_addr(w['address_base58'])}",
             )
             for w in wallets
         ],
@@ -144,7 +144,7 @@ async def nft_enter(ctx: AppContext, open_spl_page) -> None:
             dlg.open = False
             page.update()
             if not nft.get('mint'):
-                page.show_dialog(flet.AlertDialog(title=flet.Text("This NFT has no mint address; cannot send.")))
+                page.show_dialog(flet.AlertDialog(title=flet.Text(ctx.t("nft_no_mint"))))
                 return
             spl_data = {
                 'wallet_address': wallet['address_base58'],
@@ -175,13 +175,13 @@ async def nft_enter(ctx: AppContext, open_spl_page) -> None:
                 )
             )
         if not attr_rows:
-            attr_rows.append(flet.Text("(no traits)", size=11, italic=True, color=flet.Colors.GREY_500))
+            attr_rows.append(flet.Text(ctx.t("no_traits"), size=11, italic=True, color=flet.Colors.GREY_500))
 
         mint_row = flet.Row(
             [
-                flet.Text(f"Mint: {short_addr(nft.get('mint', ''))}", size=11, selectable=True, color=flet.Colors.GREY_700),
+                flet.Text(ctx.t("nft_mint_label", mint=short_addr(nft.get('mint', ''))), size=11, selectable=True, color=flet.Colors.GREY_700),
                 flet.IconButton(
-                    icon=flet.Icons.CONTENT_COPY, icon_size=16, tooltip="Copy mint",
+                    icon=flet.Icons.CONTENT_COPY, icon_size=16, tooltip=ctx.t("copy_mint"),
                     on_click=lambda ev: page.clipboard.set(nft.get('mint', '')),
                 ),
             ],
@@ -190,7 +190,7 @@ async def nft_enter(ctx: AppContext, open_spl_page) -> None:
 
         dlg = flet.AlertDialog(
             modal=True,
-            title=flet.Text(nft.get('name', 'Unnamed NFT'), max_lines=2, overflow=flet.TextOverflow.ELLIPSIS),
+            title=flet.Text(nft.get('name') or ctx.t('unnamed_nft'), max_lines=2, overflow=flet.TextOverflow.ELLIPSIS),
             content=flet.Container(
                 width=340,
                 content=flet.Column(
@@ -204,18 +204,18 @@ async def nft_enter(ctx: AppContext, open_spl_page) -> None:
                             nft.get('collection') or nft.get('symbol') or '',
                             size=13, weight=flet.FontWeight.BOLD, color=flet.Colors.GREY_700,
                         ),
-                        flet.Text(f"Network: {_network_tag(nft.get('network'))}   Amount: {nft.get('amount', 1)}", size=11, color=flet.Colors.GREY_600),
+                        flet.Text(ctx.t("nft_net_amount", net=_network_tag(nft.get('network')), amount=nft.get('amount', 1)), size=11, color=flet.Colors.GREY_600),
                         mint_row,
                         flet.Divider(thickness=1),
-                        flet.Text("Attributes", size=12, weight=flet.FontWeight.BOLD),
+                        flet.Text(ctx.t("attributes"), size=12, weight=flet.FontWeight.BOLD),
                         *attr_rows,
                     ] + ([flet.Text(nft['description'], size=11, selectable=True, color=flet.Colors.GREY_600)] if nft.get('description') else []),
                     tight=True, scroll=flet.ScrollMode.AUTO, spacing=4,
                 ),
             ),
             actions=[
-                flet.TextButton("Close", on_click=_close),
-                flet.ElevatedButton("Send NFT", icon=flet.Icons.SEND, on_click=_send),
+                flet.TextButton(ctx.t("close"), on_click=_close),
+                flet.ElevatedButton(ctx.t("nft_send_btn"), icon=flet.Icons.SEND, on_click=_send),
             ],
             actions_alignment=flet.MainAxisAlignment.END,
         )
@@ -224,7 +224,7 @@ async def nft_enter(ctx: AppContext, open_spl_page) -> None:
     async def _load(ev):
         addr = wallet_dd.value
         if not addr:
-            status_txt.value = "Pick a wallet first."
+            status_txt.value = ctx.t("nft_pick_wallet")
             page.update()
             return
         nets = []
@@ -235,13 +235,13 @@ async def nft_enter(ctx: AppContext, open_spl_page) -> None:
         if cb_devnet.value:
             nets.append(_DEVNET)
         if not nets:
-            status_txt.value = "Select at least one network."
+            status_txt.value = ctx.t("nft_pick_network")
             page.update()
             return
         grid_holder.controls.clear()
         status_txt.value = ""
         grid_holder.controls.append(
-            flet.Row([flet.ProgressRing(), flet.Text("Loading NFTs...")], alignment=flet.MainAxisAlignment.CENTER)
+            flet.Row([flet.ProgressRing(), flet.Text(ctx.t("loading_nfts"))], alignment=flet.MainAxisAlignment.CENTER)
         )
         page.update()
         try:
@@ -249,20 +249,20 @@ async def nft_enter(ctx: AppContext, open_spl_page) -> None:
         except Exception as er:
             print(f'nft_enter load error: {er}')
             nfts = []
-            status_txt.value = f"Error loading NFTs: {er}"
+            status_txt.value = ctx.t("nft_load_error", err=er)
         grid_holder.controls.clear()
         if not nfts:
             grid_holder.controls.append(
-                flet.Text("No NFTs found on the selected networks.", size=13, color=flet.Colors.GREY_600)
+                flet.Text(ctx.t("nft_no_results"), size=13, color=flet.Colors.GREY_600)
             )
             if not status_txt.value:
                 status_txt.value = ""
         else:
-            status_txt.value = f"{len(nfts)} NFT(s) found"
+            status_txt.value = ctx.tp("nft_found_pl", "nft_found_sg", len(nfts))
             wallet = wallets_by_addr.get(addr)
             gallery = flet.Row(
                 [
-                    _nft_tile(nft, wallet, _detail_click)
+                    _nft_tile(ctx, nft, wallet, _detail_click)
                     for nft in nfts
                 ],
                 wrap=True, alignment=flet.MainAxisAlignment.CENTER,
@@ -271,10 +271,10 @@ async def nft_enter(ctx: AppContext, open_spl_page) -> None:
             grid_holder.controls.append(gallery)
         page.update()
 
-    load_btn = flet.ElevatedButton("Load NFTs", icon=flet.Icons.COLLECTIONS, on_click=_load)
+    load_btn = flet.ElevatedButton(ctx.t("nft_load_btn"), icon=flet.Icons.COLLECTIONS, on_click=_load)
 
     el_nft_page.controls.extend([
-        flet.Text("NFT Gallery", size=16, weight=flet.FontWeight.BOLD),
+        flet.Text(ctx.t("nft_heading"), size=16, weight=flet.FontWeight.BOLD),
         flet.Row([wallet_dd], alignment=flet.MainAxisAlignment.CENTER),
         flet.Row([cb_mainnet, cb_testnet, cb_devnet], alignment=flet.MainAxisAlignment.CENTER),
         flet.Row([load_btn], alignment=flet.MainAxisAlignment.CENTER),
@@ -300,7 +300,7 @@ def build_nft_page(ctx: AppContext) -> flet.View:
     return flet.View(
         route="nft-page",
         appbar=flet.AppBar(
-            title=flet.Text("NFT Gallery"),
+            title=flet.Text(ctx.t("nft_appbar_title")),
             color="white",
             bgcolor="#7c3aed",
             leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
@@ -309,7 +309,7 @@ def build_nft_page(ctx: AppContext) -> flet.View:
         horizontal_alignment=flet.CrossAxisAlignment.CENTER,
         scroll=flet.ScrollMode.AUTO,
         controls=[
-            flet.Text('NFT Gallery', size=30, font_family="Georgia"),
+            flet.Text(ctx.t("nft_heading"), size=30, font_family="Georgia"),
             ctx.controls["el_nft_page"],
         ],
     )

@@ -537,6 +537,320 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "The result airdrop SOL for wallet address: {addr}: {result}",
         "ru": "Результат запроса airdrop SOL для адреса: {addr}: {result}",
     },
+    # --- priority_fee.py (Auto/Low/Med/High/Custom selector) - Phase 4 ---
+    "pf_auto": {"en": "Auto", "ru": "Авто"},
+    "pf_low": {"en": "Low", "ru": "Низкий"},
+    "pf_medium": {"en": "Medium", "ru": "Средний"},
+    "pf_high": {"en": "High", "ru": "Высокий"},
+    "pf_custom": {"en": "Custom", "ru": "Другой"},
+    "pf_title": {
+        "en": "Priority fee (lands faster when the network is busy)",
+        "ru": "Приоритетная комиссия (ускоряет при загрузке сети)",
+    },
+    "pf_estimate_auto": {
+        "en": "Priority fee: Auto (no priority fee)",
+        "ru": "Приоритетная комиссия: Авто (без приоритетной комиссии)",
+    },
+    "pf_estimate_amount": {
+        "en": "Priority fee: {ul:,} µLamports/CU → ≈ {sol} SOL",
+        "ru": "Приоритетная комиссия: {ul:,} µLamports/CU → ≈ {sol} SOL",
+    },
+    # --- swap.py (Jupiter swap) - Phase 4 ---
+    "get_quote": {"en": "Get Quote", "ru": "Получить котировку"},
+    "swap_appbar_title": {"en": "Swap (Jupiter)", "ru": "Обмен (Jupiter)"},
+    "swap_heading": {"en": "Swap Tokens", "ru": "Обмен токенов"},
+    "swap_mainnet_only": {
+        "en": "Swaps are only supported on mainnet-beta.",
+        "ru": "Обмен поддерживается только в mainnet-beta.",
+    },
+    "swap_needs_key": {
+        "en": "Swap needs the wallet's private key. Recover the wallet with "
+              "its secret to enable swaps.",
+        "ru": "Для обмена нужен приватный ключ кошелька. Восстановите кошелёк "
+              "с помощью секрета, чтобы включить обмен.",
+    },
+    "swap_input_token": {"en": "Input token", "ru": "Входной токен"},
+    "swap_output_token": {"en": "Output token", "ru": "Выходной токен"},
+    "amount_label": {"en": "Amount", "ru": "Количество"},
+    "slippage_pct": {"en": "Slippage %", "ru": "Проскальзывание %"},
+    "swap_enter_amount": {
+        "en": "Enter an amount and press Get Quote.",
+        "ru": "Введите сумму и нажмите «Получить котировку».",
+    },
+    "tokens_must_differ": {
+        "en": "Input and output tokens must differ.",
+        "ru": "Входной и выходной токены должны различаться.",
+    },
+    "invalid_amount_short": {"en": "Invalid amount.", "ru": "Недопустимая сумма."},
+    "amount_gt_zero": {
+        "en": "Amount must be greater than 0.",
+        "ru": "Сумма должна быть больше 0.",
+    },
+    "fetching_quote": {"en": "Fetching quote...", "ru": "Получение котировки..."},
+    "min_received": {
+        "en": "Min received (with slippage): {amount} {sym}",
+        "ru": "Мин. к получению (с проскальзыванием): {amount} {sym}",
+    },
+    "price_impact": {
+        "en": "Price impact: {pct}%",
+        "ru": "Ценовое влияние: {pct}%",
+    },
+    "quote_error": {"en": "Quote error: {err}", "ru": "Ошибка котировки: {err}"},
+    "press_quote_first": {
+        "en": "Press Get Quote first.",
+        "ru": "Сначала нажмите «Получить котировку».",
+    },
+    "swap_inputs_changed": {
+        "en": "Inputs changed since the quote. Press Get Quote again, then Swap.",
+        "ru": "Ввод изменился после котировки. Нажмите «Получить котировку» снова, затем «Обмен».",
+    },
+    "swapping_wait": {"en": "Swapping... please wait", "ru": "Обмен... подождите"},
+    "swap_success": {
+        "en": "Swap SUCCESS ({status})!\nReceived ~{received} {sym}\nsignature: {sig}",
+        "ru": "Обмен ВЫПОЛНЕН ({status})!\nПолучено ~{received} {sym}\nподпись: {sig}",
+    },
+    "swap_failed": {
+        "en": "Swap FAILED: {err}\nsignature: {sig}",
+        "ru": "Обмен НЕ УДАЛСЯ: {err}\nподпись: {sig}",
+    },
+    "swap_error": {"en": "Swap error: {err}", "ru": "Ошибка обмена: {err}"},
+    # --- staking.py (liquid staking) - Phase 4 ---
+    "wallet_dd_label": {"en": "Wallet", "ru": "Кошелёк"},
+    "lbl_wallet": {"en": "Wallet: ", "ru": "Кошелёк: "},
+    "stake_into": {"en": "Stake into", "ru": "Стейкать в"},
+    "amount_sol_short": {"en": "Amount (SOL)", "ru": "Количество (SOL)"},
+    "stake_sol_btn": {"en": "Stake SOL", "ru": "Стейкать SOL"},
+    "refresh_positions": {"en": "Refresh Positions", "ru": "Обновить позиции"},
+    "unstake_btn": {"en": "Unstake", "ru": "Вывести из стейкинга"},
+    "lst_appbar_title": {"en": "Liquid Staking", "ru": "Ликвидный стейкинг"},
+    "lst_heading": {"en": "Liquid Staking", "ru": "Ликвидный стейкинг"},
+    "lst_no_wallets": {
+        "en": "No wallets yet. Add a wallet first to use liquid staking.",
+        "ru": "Кошельков пока нет. Сначала добавьте кошелёк для ликвидного стейкинга.",
+    },
+    "lst_intro": {
+        "en": "Stake SOL into a Liquid Staking Token via Jupiter. The token gains value "
+              "against SOL over time — that growth is your yield. Unstake = swap back to SOL. "
+              "Mainnet only.",
+        "ru": "Стейкайте SOL в токен ликвидного стейкинга через Jupiter. Токен растёт "
+              "относительно SOL со временем — этот рост и есть ваша доходность. "
+              "Вывод = обмен обратно на SOL. Только mainnet.",
+    },
+    "lst_no_positions": {
+        "en": "No liquid-staking positions yet for this wallet.",
+        "ru": "У этого кошелька пока нет позиций ликвидного стейкинга.",
+    },
+    "loading_positions": {"en": "Loading positions...", "ru": "Загрузка позиций..."},
+    "stake_needs_key": {
+        "en": "Staking needs the wallet's private key. Unlock the wallet or recover "
+              "it with its secret.",
+        "ru": "Для стейкинга нужен приватный ключ кошелька. Разблокируйте кошелёк "
+              "или восстановите его с помощью секрета.",
+    },
+    "stake_inputs_changed": {
+        "en": "Inputs changed. Press Get Quote again, then Stake SOL.",
+        "ru": "Ввод изменился. Нажмите «Получить котировку» снова, затем «Стейкать SOL».",
+    },
+    "staking_wait": {"en": "Staking... please wait", "ru": "Стейкинг... подождите"},
+    "stake_received": {
+        "en": "\nReceived ~{amount} {sym}",
+        "ru": "\nПолучено ~{amount} {sym}",
+    },
+    "stake_success": {
+        "en": "Stake SUCCESS ({status})!{received}\nsignature: {sig}",
+        "ru": "Стейкинг ВЫПОЛНЕН ({status})!{received}\nподпись: {sig}",
+    },
+    "stake_failed": {
+        "en": "Stake FAILED: {err}\nsignature: {sig}",
+        "ru": "Стейкинг НЕ УДАЛСЯ: {err}\nподпись: {sig}",
+    },
+    "stake_error": {"en": "Stake error: {err}", "ru": "Ошибка стейкинга: {err}"},
+    "lst_rate": {
+        "en": "  (1 {sym} ≈ {rate} SOL — accumulated yield)",
+        "ru": "  (1 {sym} ≈ {rate} SOL — накопленная доходность)",
+    },
+    "lst_value": {"en": "Value {usd}{rate}", "ru": "Стоимость {usd}{rate}"},
+    "unstake_field": {"en": "Unstake {sym}", "ru": "Вывести {sym}"},
+    "invalid_sym_amount": {
+        "en": "Invalid {sym} amount.",
+        "ru": "Недопустимое количество {sym}.",
+    },
+    "unstake_needs_key": {
+        "en": "Unstake needs the wallet's private key. Unlock or recover the wallet.",
+        "ru": "Для вывода нужен приватный ключ кошелька. Разблокируйте или восстановите кошелёк.",
+    },
+    "unstaking_wait": {
+        "en": "Unstaking {amt} {sym}...",
+        "ru": "Вывод {amt} {sym} из стейкинга...",
+    },
+    "unstake_received": {"en": " (~{amount} SOL)", "ru": " (~{amount} SOL)"},
+    "unstake_success": {
+        "en": "Unstake SUCCESS{received}\n{sig}",
+        "ru": "Вывод из стейкинга выполнен{received}\n{sig}",
+    },
+    "unstake_failed": {
+        "en": "Unstake FAILED: {err}\n{sig}",
+        "ru": "Вывод НЕ УДАЛСЯ: {err}\n{sig}",
+    },
+    "unstake_error": {"en": "Unstake error: {err}", "ru": "Ошибка вывода: {err}"},
+    "err_loading_positions": {
+        "en": "Error loading positions: {err}",
+        "ru": "Ошибка загрузки позиций: {err}",
+    },
+    # --- nft.py (NFT gallery) - Phase 4 ---
+    "nft_appbar_title": {"en": "NFT Gallery", "ru": "Галерея NFT"},
+    "nft_heading": {"en": "NFT Gallery", "ru": "Галерея NFT"},
+    "nft_no_wallets": {
+        "en": "No wallets yet. Add a wallet first to view its NFTs.",
+        "ru": "Кошельков пока нет. Сначала добавьте кошелёк, чтобы посмотреть его NFT.",
+    },
+    "nft_load_btn": {"en": "Load NFTs", "ru": "Загрузить NFT"},
+    "unnamed_nft": {"en": "Unnamed NFT", "ru": "NFT без названия"},
+    "no_traits": {"en": "(no traits)", "ru": "(нет атрибутов)"},
+    "copy_mint": {"en": "Copy mint", "ru": "Копировать mint"},
+    "nft_no_results": {
+        "en": "No NFTs found on the selected networks.",
+        "ru": "NFT на выбранных сетях не найдены.",
+    },
+    "nft_send_btn": {"en": "Send NFT", "ru": "Отправить NFT"},
+    "loading_nfts": {"en": "Loading NFTs...", "ru": "Загрузка NFT..."},
+    "nft_no_mint": {
+        "en": "This NFT has no mint address; cannot send.",
+        "ru": "У этого NFT нет адреса mint; отправка невозможна.",
+    },
+    "attributes": {"en": "Attributes", "ru": "Атрибуты"},
+    "nft_net_amount": {
+        "en": "Network: {net}   Amount: {amount}",
+        "ru": "Сеть: {net}   Количество: {amount}",
+    },
+    "nft_mint_label": {"en": "Mint: {mint}", "ru": "Mint-адрес: {mint}"},
+    "nft_pick_wallet": {"en": "Pick a wallet first.", "ru": "Сначала выберите кошелёк."},
+    "nft_pick_network": {
+        "en": "Select at least one network.",
+        "ru": "Выберите хотя бы одну сеть.",
+    },
+    "nft_load_error": {
+        "en": "Error loading NFTs: {err}",
+        "ru": "Ошибка загрузки NFT: {err}",
+    },
+    "nft_found_sg": {"en": "{n} NFT found", "ru": "{n} NFT найден"},
+    "nft_found_pl": {"en": "{n} NFT(s) found", "ru": "{n} NFT найдено"},
+    # --- walletconnect.py (WC2 responder) - Phase 4 ---
+    "wc_status_idle": {"en": "WC: idle", "ru": "WC: ожидание"},
+    "wc_status_ready": {
+        "en": "WC ready (clientId {cid}…)",
+        "ru": "WC готов (clientId {cid}…)",
+    },
+    "wc_status_pairing": {
+        "en": "Pairing… waiting for the dApp's session proposal.",
+        "ru": "Сопряжение… ожидание предложения сессии от dApp.",
+    },
+    "wc_no_wallets": {
+        "en": "No wallets available. Add a wallet first.",
+        "ru": "Нет доступных кошельков. Сначала добавьте кошелёк.",
+    },
+    "wc_account_to_connect": {
+        "en": "Account to connect",
+        "ru": "Аккаунт для подключения",
+    },
+    "wc_session_approved": {
+        "en": "Session approved ({topic}…).",
+        "ru": "Сессия одобрена ({topic}…).",
+    },
+    "wc_approve_failed": {
+        "en": "Approve failed: {err}",
+        "ru": "Не удалось одобрить: {err}",
+    },
+    "wc_connect_to": {
+        "en": "Connect to {name}?",
+        "ru": "Подключиться к «{name}»?",
+    },
+    "wc_chains": {"en": "Chains: {chains}", "ru": "Цепочки: {chains}"},
+    "wc_methods": {"en": "Methods: {methods}", "ru": "Методы: {methods}"},
+    "reject": {"en": "Reject", "ru": "Отклонить"},
+    "approve": {"en": "Approve", "ru": "Одобрить"},
+    "approve_sign": {"en": "Approve & Sign", "ru": "Одобрить и подписать"},
+    "wc_no_priv_key": {
+        "en": "No private key for {target} (watch-only / not found).",
+        "ru": "Нет приватного ключа для {target} (только просмотр / не найден).",
+    },
+    "wc_signed_sent": {
+        "en": "Signed & sent to dApp.",
+        "ru": "Подписано и отправлено в dApp.",
+    },
+    "wc_sign_failed": {
+        "en": "Sign failed: {err}",
+        "ru": "Не удалось подписать: {err}",
+    },
+    "wc_dapp_request": {
+        "en": "dApp request: {method}",
+        "ru": "Запрос dApp: {method}",
+    },
+    "wc_sim_fail_block": {
+        "en": "⚠ Simulation predicts this transaction will FAIL. Signing is blocked.",
+        "ru": "⚠ Симуляция предсказывает, что транзакция НЕ УДАСТСЯ. Подпись заблокирована.",
+    },
+    "wc_account": {"en": "Account: {acct}", "ru": "Аккаунт: {acct}"},
+    "wc_accounts": {"en": "accounts: {accts}", "ru": "аккаунты: {accts}"},
+    "wc_no_sessions": {"en": "No active sessions.", "ru": "Нет активных сессий."},
+    "wc_disconnect": {"en": "Disconnect", "ru": "Отключить"},
+    "wc_uri_label": {
+        "en": "Paste dApp 'wc:' URI",
+        "ru": "Вставьте «wc:» URI из dApp",
+    },
+    "wc_enter_projectid": {
+        "en": "Enter your WalletConnect projectId first (free at cloud.walletconnect.com).",
+        "ru": "Сначала введите ваш WalletConnect projectId (бесплатно на cloud.walletconnect.com).",
+    },
+    "wc_invalid_uri": {
+        "en": "Paste a valid 'wc:' URI copied from a dApp.",
+        "ru": "Вставьте корректный «wc:» URI, скопированный из dApp.",
+    },
+    "wc_pair_failed": {
+        "en": "Pair failed: {err}",
+        "ru": "Сопряжение не удалось: {err}",
+    },
+    "wc_pid_saved": {"en": "projectId saved.", "ru": "projectId сохранён."},
+    "wc_save_pid": {"en": "Save projectId", "ru": "Сохранить projectId"},
+    "wc_connect_btn": {"en": "Connect", "ru": "Подключить"},
+    "wc_connect_heading": {"en": "Connect to a dApp", "ru": "Подключение к dApp"},
+    "wc_steps": {
+        "en": "1) Get a free projectId at cloud.walletconnect.com (one-time).\n"
+              "2) Save it below. 3) Paste the 'wc:' URI a dApp shows you and Connect.",
+        "ru": "1) Получите бесплатный projectId на cloud.walletconnect.com (однократно).\n"
+              "2) Сохраните его ниже. 3) Вставьте «wc:» URI из dApp и нажмите «Подключить».",
+    },
+    "wc_active_sessions": {"en": "Active sessions:", "ru": "Активные сессии:"},
+    "wc_appbar_title": {
+        "en": "Connect dApp (WalletConnect v2)",
+        "ru": "Подключить dApp (WalletConnect v2)",
+    },
+    # simulation preview labels (walletconnect _render_preview) - Phase 4
+    "sim_method": {"en": "Method: {val}", "ru": "Метод: {val}"},
+    "sim_chain": {"en": "Chain: {val}", "ru": "Цепочка: {val}"},
+    "sim_programs": {"en": "Programs: {val}", "ru": "Программы: {val}"},
+    "sim_unverified_list": {
+        "en": "⚠ Unverified programs: {progs}",
+        "ru": "⚠ Непроверенные программы: {progs}",
+    },
+    "unverified_prog_sg": {
+        "en": "⚠ {n} unverified program",
+        "ru": "⚠ {n} непроверенная программа",
+    },
+    "unverified_prog_pl": {
+        "en": "⚠ {n} unverified programs",
+        "ru": "⚠ {n} непроверенных программ",
+    },
+    "sim_pred_status": {
+        "en": "Predicted status: {val}",
+        "ru": "Прогноз статуса: {val}",
+    },
+    "sim_fee": {"en": "Fee: {fee} SOL", "ru": "Комиссия: {fee} SOL"},
+    "sim_message": {"en": "Message: {val}", "ru": "Сообщение: {val}"},
+    "sim_preview_error": {
+        "en": "preview error: {val}",
+        "ru": "ошибка предпросмотра: {val}",
+    },
     # ...keys added as modules are migrated (Phases 4-5)...
 }
 

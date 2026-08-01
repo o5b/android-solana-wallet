@@ -123,25 +123,25 @@ def _dapp_name(obj: dict) -> str:
     return md.get("name") or md.get("url") or "dApp"
 
 
-def _render_preview(preview: dict, show_program_ids: bool = False) -> str:
+def _render_preview(ctx: AppContext, preview: dict, show_program_ids: bool = False) -> str:
     """Render a simulation preview dict as the multi-line text shown in the
     request dialog. ``show_program_ids`` (Developer mode) expands the
     unverified-programs list instead of collapsing it to a count."""
     method = preview.get("method")
-    lines = [f"Method: {method}", f"Chain: {preview.get('chain_id')}"]
+    lines = [ctx.t("sim_method", val=method), ctx.t("sim_chain", val=preview.get('chain_id'))]
     decoded = preview.get("decoded") or {}
     if decoded.get("programs"):
-        lines.append("Programs: " + ", ".join(decoded["programs"]))
+        lines.append(ctx.t("sim_programs", val=", ".join(decoded["programs"])))
     if decoded.get("unknown_programs"):
         if show_program_ids:
-            lines.append("⚠ Unverified programs: " + ", ".join(decoded["unknown_programs"]))
+            lines.append(ctx.t("sim_unverified_list", progs=", ".join(decoded["unknown_programs"])))
         else:
-            lines.append(f"⚠ {len(decoded['unknown_programs'])} unverified program(s)")
+            lines.append(ctx.tp("unverified_prog_pl", "unverified_prog_sg", len(decoded['unknown_programs'])))
     sim = preview.get("simulation") or {}
     if sim:
-        lines.append("Predicted status: " + str(sim.get("status")))
+        lines.append(ctx.t("sim_pred_status", val=sim.get("status")))
         if sim.get("fee_sol") is not None:
-            lines.append("Fee: " + str(sim.get("fee_sol")) + " SOL")
+            lines.append(ctx.t("sim_fee", fee=sim.get("fee_sol")))
         for ch in (sim.get("sol_changes") or [])[:8]:
             acct = str(ch.get("account", ""))
             lines.append(f"SOL Δ {acct[:10]}…: {ch.get('delta_sol', 0):+.9f}")
@@ -153,9 +153,9 @@ def _render_preview(preview: dict, show_program_ids: bool = False) -> str:
         for w in sim.get("warnings") or []:
             lines.append("⚠ " + w)
     if preview.get("message_utf8") is not None:
-        lines.append("Message: " + str(preview["message_utf8"]))
+        lines.append(ctx.t("sim_message", val=preview["message_utf8"]))
     if preview.get("preview_error"):
-        lines.append("preview error: " + str(preview["preview_error"]))
+        lines.append(ctx.t("sim_preview_error", val=preview["preview_error"]))
     return "\n".join(lines)
 
 
@@ -179,7 +179,7 @@ async def _refresh_sessions(ctx: AppContext) -> None:
     wc_sessions_list.controls.clear()
     client = _wc_state(ctx)["client"]
     if client is None or not client.list_sessions():
-        wc_sessions_list.controls.append(flet.Text("No active sessions."))
+        wc_sessions_list.controls.append(flet.Text(ctx.t("wc_no_sessions")))
     else:
         for s in client.list_sessions():
             peer_md = s.get("peerMetadata", {}) or {}
@@ -191,9 +191,9 @@ async def _refresh_sessions(ctx: AppContext) -> None:
                             [
                                 flet.Text(_dapp_name(s), size=16, weight=flet.FontWeight.BOLD),
                                 flet.Text(peer_md.get("url") or "", size=11, selectable=True),
-                                flet.Text("accounts: " + acct_short, size=11, selectable=True),
+                                flet.Text(ctx.t("wc_accounts", accts=acct_short), size=11, selectable=True),
                                 flet.Row(
-                                    [flet.OutlinedButton("Disconnect", on_click=_make_disconnect_handler(ctx, s["topic"]))]
+                                    [flet.OutlinedButton(ctx.t("wc_disconnect"), on_click=_make_disconnect_handler(ctx, s["topic"]))]
                                 ),
                             ]
                         ),
@@ -215,10 +215,10 @@ async def _on_proposal(ctx: AppContext, proposal: dict) -> None:
     wallets = await load_wallets(ctx)
     addrs = [w.get("address_base58") for w in wallets if w.get("address_base58")]
     if not addrs:
-        page.show_dialog(flet.AlertDialog(title=flet.Text("No wallets available. Add a wallet first.")))
+        page.show_dialog(flet.AlertDialog(title=flet.Text(ctx.t("wc_no_wallets"))))
         return
     dd = flet.Dropdown(
-        label="Account to connect",
+        label=ctx.t("wc_account_to_connect"),
         options=[flet.dropdown.Option(a) for a in addrs],
         value=addrs[0],
         width=320,
@@ -237,9 +237,9 @@ async def _on_proposal(ctx: AppContext, proposal: dict) -> None:
         client = _wc_state(ctx)["client"]
         try:
             topic = await client.approve(proposal["id"], accounts=[dd.value])
-            page.show_dialog(flet.AlertDialog(title=flet.Text(f"Session approved ({topic[:8]}…).")))
+            page.show_dialog(flet.AlertDialog(title=flet.Text(ctx.t("wc_session_approved", topic=topic[:8]))))
         except Exception as ex:
-            page.show_dialog(flet.AlertDialog(title=flet.Text(f"Approve failed: {ex}")))
+            page.show_dialog(flet.AlertDialog(title=flet.Text(ctx.t("wc_approve_failed", err=ex))))
 
     async def do_reject(e):
         dlg_p.open = False
@@ -249,21 +249,21 @@ async def _on_proposal(ctx: AppContext, proposal: dict) -> None:
             await client.reject(proposal["id"])
 
     dlg_p = flet.AlertDialog(
-        title=flet.Text(f"Connect to {meta.get('name', 'dApp')}?"),
+        title=flet.Text(ctx.t("wc_connect_to", name=meta.get('name', 'dApp'))),
         content=flet.Column(
             [
                 flet.Text(meta.get("url") or "", size=11, selectable=True),
                 flet.Text((meta.get("description") or "")[:160], size=11),
-                flet.Text("Chains: " + ", ".join(chains), size=12),
-                flet.Text("Methods: " + ", ".join(methods), size=12),
+                flet.Text(ctx.t("wc_chains", chains=", ".join(chains)), size=12),
+                flet.Text(ctx.t("wc_methods", methods=", ".join(methods)), size=12),
                 dd,
             ],
             scroll=flet.ScrollMode.AUTO,
             height=280,
         ),
         actions=[
-            flet.TextButton("Reject", on_click=do_reject),
-            flet.ElevatedButton("Approve", on_click=do_approve),
+            flet.TextButton(ctx.t("reject"), on_click=do_reject),
+            flet.ElevatedButton(ctx.t("approve"), on_click=do_approve),
         ],
         actions_alignment=flet.MainAxisAlignment.END,
     )
@@ -280,7 +280,7 @@ async def _on_request(ctx: AppContext, session: dict, request: dict, preview: di
     if not target and accounts:
         target = accounts[0]
     _wc_mode = await get_experience(page)
-    preview_text = _render_preview(preview, show_program_ids=feature("sim_detail", _wc_mode))
+    preview_text = _render_preview(ctx, preview, show_program_ids=feature("sim_detail", _wc_mode))
 
     async def do_approve(e):
         dlg_r.open = False
@@ -289,15 +289,15 @@ async def _on_request(ctx: AppContext, session: dict, request: dict, preview: di
         priv = await _resolve_signer(ctx, target)
         if not priv:
             page.show_dialog(
-                flet.AlertDialog(title=flet.Text(f"No private key for {target} (watch-only / not found)."))
+                flet.AlertDialog(title=flet.Text(ctx.t("wc_no_priv_key", target=target or '?')))
             )
             await client.reject_request(rid)
             return
         try:
             await client.approve_request(rid, priv)
-            page.show_dialog(flet.AlertDialog(title=flet.Text("Signed & sent to dApp.")))
+            page.show_dialog(flet.AlertDialog(title=flet.Text(ctx.t("wc_signed_sent"))))
         except Exception as ex:
-            page.show_dialog(flet.AlertDialog(title=flet.Text(f"Sign failed: {ex}")))
+            page.show_dialog(flet.AlertDialog(title=flet.Text(ctx.t("wc_sign_failed", err=ex))))
             await client.reject_request(rid)
 
     async def do_reject(e):
@@ -310,13 +310,13 @@ async def _on_request(ctx: AppContext, session: dict, request: dict, preview: di
     sim = preview.get("simulation") or {}
     sim_fail = sim.get("status") == "error"
     content_controls = [
-        flet.Text(f"Account: {target or '?'}", size=11, selectable=True),
+        flet.Text(ctx.t("wc_account", acct=target or '?'), size=11, selectable=True),
         flet.Text(preview_text, selectable=True, size=12),
     ]
     if sim_fail:
         content_controls.append(
             flet.Text(
-                "⚠ Simulation predicts this transaction will FAIL. Signing is blocked.",
+                ctx.t("wc_sim_fail_block"),
                 color="red",
                 size=12,
             )
@@ -369,15 +369,15 @@ async def _on_request(ctx: AppContext, session: dict, request: dict, preview: di
             )
         )
     dlg_r = flet.AlertDialog(
-        title=flet.Text(f"dApp request: {method}"),
+        title=flet.Text(ctx.t("wc_dapp_request", method=method)),
         content=flet.Column(
             content_controls,
             scroll=flet.ScrollMode.AUTO,
             height=380,
         ),
         actions=[
-            flet.TextButton("Reject", on_click=do_reject),
-            flet.ElevatedButton("Approve & Sign", on_click=do_approve, disabled=sim_fail),
+            flet.TextButton(ctx.t("reject"), on_click=do_reject),
+            flet.ElevatedButton(ctx.t("approve_sign"), on_click=do_approve, disabled=sim_fail),
         ],
         actions_alignment=flet.MainAxisAlignment.END,
     )
@@ -423,7 +423,7 @@ async def _ensure_client(ctx: AppContext) -> WalletConnectClient | None:
     )
     await client.start()
     st["client"] = client
-    ctx.controls["wc_status_text"].value = f"WC ready (clientId {client.client_id[:18]}…)"
+    ctx.controls["wc_status_text"].value = ctx.t("wc_status_ready", cid=client.client_id[:18])
     ctx.safe_update()
     return client
 
@@ -433,27 +433,27 @@ async def wc_connect_click(ctx: AppContext, e) -> None:
     if client is None:
         ctx.page.show_dialog(
             flet.AlertDialog(
-                title=flet.Text("Enter your WalletConnect projectId first (free at cloud.walletconnect.com).")
+                title=flet.Text(ctx.t("wc_enter_projectid"))
             )
         )
         return
     uri = (ctx.controls["wc_uri_input"].value or "").strip()
     if not uri.startswith("wc:"):
-        ctx.page.show_dialog(flet.AlertDialog(title=flet.Text("Paste a valid 'wc:' URI copied from a dApp.")))
+        ctx.page.show_dialog(flet.AlertDialog(title=flet.Text(ctx.t("wc_invalid_uri"))))
         return
     try:
         await client.pair(uri)
-        ctx.controls["wc_status_text"].value = "Pairing… waiting for the dApp's session proposal."
+        ctx.controls["wc_status_text"].value = ctx.t("wc_status_pairing")
         ctx.safe_update()
     except Exception as ex:
-        ctx.page.show_dialog(flet.AlertDialog(title=flet.Text(f"Pair failed: {ex}")))
+        ctx.page.show_dialog(flet.AlertDialog(title=flet.Text(ctx.t("wc_pair_failed", err=ex))))
 
 
 async def wc_save_pid_click(ctx: AppContext, e) -> None:
     pid = (ctx.controls["wc_pid_input"].value or "").strip()
     if pid:
         await ctx.page.shared_preferences.set(WC_PROJECT_ID_KEY, pid)
-        ctx.page.show_dialog(flet.AlertDialog(title=flet.Text("projectId saved.")))
+        ctx.page.show_dialog(flet.AlertDialog(title=flet.Text(ctx.t("wc_pid_saved"))))
 
 
 # ---------------------------------------------------------------------------
@@ -472,9 +472,9 @@ def build_wc_page(ctx: AppContext) -> flet.View:
     ``ctx.controls`` (registered by ``main()``), matching the devtools view
     builders.
     """
-    wc_uri_input = flet.TextField(label="Paste dApp 'wc:' URI", width=340, multiline=True, max_lines=3)
+    wc_uri_input = flet.TextField(label=ctx.t("wc_uri_label"), width=340, multiline=True, max_lines=3)
     wc_pid_input = flet.TextField(label="WalletConnect projectId", width=300)
-    wc_status_text = flet.Text("WC: idle", size=12, selectable=True)
+    wc_status_text = flet.Text(ctx.t("wc_status_idle"), size=12, selectable=True)
     wc_sessions_list = flet.Column(spacing=8)
     ctx.controls["wc_uri_input"] = wc_uri_input
     ctx.controls["wc_pid_input"] = wc_pid_input
@@ -490,7 +490,7 @@ def build_wc_page(ctx: AppContext) -> flet.View:
     return flet.View(
         route="wc-page",
         appbar=flet.AppBar(
-            title=flet.Text("Connect dApp (WalletConnect v2)"),
+            title=flet.Text(ctx.t("wc_appbar_title")),
             color="white",
             bgcolor="#8b5cf6",
             leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=ctx.controls["view_pop"]),
@@ -499,26 +499,25 @@ def build_wc_page(ctx: AppContext) -> flet.View:
         horizontal_alignment=flet.CrossAxisAlignment.CENTER,
         scroll=flet.ScrollMode.AUTO,
         controls=[
-            flet.Text("Connect to a dApp", size=26, font_family="Georgia", weight=flet.FontWeight.BOLD),
+            flet.Text(ctx.t("wc_connect_heading"), size=26, font_family="Georgia", weight=flet.FontWeight.BOLD),
             flet.Text(
-                "1) Get a free projectId at cloud.walletconnect.com (one-time).\n"
-                "2) Save it below. 3) Paste the 'wc:' URI a dApp shows you and Connect.",
+                ctx.t("wc_steps"),
                 size=11,
                 text_align=flet.TextAlign.CENTER,
             ),
             flet.Row(
-                [wc_pid_input, flet.ElevatedButton("Save projectId", on_click=_save_pid)],
+                [wc_pid_input, flet.ElevatedButton(ctx.t("wc_save_pid"), on_click=_save_pid)],
                 alignment=flet.MainAxisAlignment.CENTER,
             ),
             flet.Divider(),
             flet.Column(
                 [wc_uri_input,
-                 flet.ElevatedButton("Connect", on_click=_connect, icon=flet.Icons.LINK, width=200)],
+                 flet.ElevatedButton(ctx.t("wc_connect_btn"), on_click=_connect, icon=flet.Icons.LINK, width=200)],
                 horizontal_alignment=flet.CrossAxisAlignment.CENTER,
             ),
             wc_status_text,
             flet.Divider(),
-            flet.Text("Active sessions:", size=16, weight=flet.FontWeight.BOLD),
+            flet.Text(ctx.t("wc_active_sessions"), size=16, weight=flet.FontWeight.BOLD),
             wc_sessions_list,
         ],
     )
