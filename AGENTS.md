@@ -424,7 +424,7 @@ in 5 phases; each phase = one commit, all 18 offline suites stay green.
 | 2 — Visible screens | `app.py` + `balance.py` + `more.py` | ✅ `21b6213` |
 | 3 — Transfers + address book | `transfer.py` + `wallet_create.py` + `addressbook.py` + `security_gate.py` | ✅ `7e81ad6` |
 | 4 — WEB3 tools | `walletconnect.py` + `nft.py` + `staking.py` + `swap.py` + `priority_fee.py` | ✅ `598a23b` |
-| 5 — Finalize ru + AST audit | complete ru locale, plural audit, `find_translatable_strings()` = 0, Playwright EN+RU | ⬜ NEXT |
+| 5 — Finalize ru + AST audit | `settings.py` + `devtools.py` + `experience.py` migration, AST = 0 user literals, RU 3-form plurals, live-switch, Playwright EN+RU, APK build | ✅ `ff5f988` |
 
 **Resume checklist:** confirm baseline (`tests/test_app_ui.py` + `tests/test_i18n.py`),
 run the AST audit in the plan's §5 for the next module(s), follow §9. Keys live in
@@ -507,6 +507,68 @@ translated `quote_error`/`stake_error` prefix (same pattern as the Phase-3
 fallback is a brand. `pf_estimate_amount` keeps `{ul:,}` thousands-separator format spec
 inline in the template (str.format supports it). `_nft_tile` gained a `ctx` first param
 (for the `unnamed_nft` fallback) — internal helper, no external signature impact.
+
+**Phase-5 decisions to carry forward (finalization — `settings.py` + `devtools.py` +
+`experience.py`, plural + audit):** the full-`src/ui/` AST re-audit (`find_translatable_strings`,
+plan §5) surfaced that the two **previously-untouched** modules still held untranslated
+chrome — `settings.py` (Developer-mode dialog + About section; the theme labels were set
+via runtime `.label =` ternaries the AST scan misses, so also grepped for `= "…"`
+attribute assignments) and `devtools.py` (Storage/Simulation/Raw-RPC inspectors + Export
+raw keys; only its 3 ru-hardcodes were done in Phase 1). Both are now fully migrated to
+`ctx.t()`, **bringing the audit to 0 user-facing chrome literals** (the remaining 30 hits
+are all documented technical exceptions — see below). `experience.py` `label()`/`description()`
+were EN-only data shown in Settings; they now route through `i18n` via an **optional
+`lang` param defaulting to `None`→EN**, so every legacy caller + the `description(SIMPLE)`
+test lock is byte-identical while Settings passes `ctx.lang` for live switching. Reused
+existing keys where EN matched (`settings`/`appearance`/`about`/`experience_level`/
+`app_title`/"Solana Wallet"/`cancel`/`theme_light`/`theme_dark`/`delete`/`copy`/
+`watch_only_tag`/`info_address`/`wallet_dd_label`); new keys: `dev_mode_*`, `about_tagline`,
+`about_desc`, `exp_*`/`exp_*_desc`, plus the `devtools` chrome (`sim_*`/`rpc_*`/`rawkey_*`/
+`export_raw_keys`/`dev_storage_title`/`no_wallets_add_first`/`analyze`/`run`/`reveal`/
+`copy_raw_json`/`copy_response`/`simulating`/`sim_paste_first`).
+
+**Plural audit + backward-compatible 3-form RU:** all six `tp()` pairs' sg (n=1/21/101) and
+pl (n=5/11) forms verified grammatically correct. The legacy 2-form rule made the **2-4**
+range fall to plural (the §7.3 simplification). `tp()`/`ctx.tp()` now take an optional
+keyword `mid=` — when given, the RU 2-4 range (`2<=n%10<=4 and not 10<=n%100<=20`) uses the
+middle form; without it behaviour is unchanged (so the locked `tp(spam_hidden_pl, …, 2, "ru")
+== "2 спам-токенов скрыто"` test stays green). Applied `mid=` to the two pairs with
+distinct 2-4 noun forms — `unverified_prog` ("непроверенная программа → непроверенные
+программы → непроверенных программ") and `spam_hidden_click` ("токен → токена → токенов");
+the other four (`nft_found`/`spam_count`/`suspicious_count` use count-neutral predicates
+("найдено"/"спама"/genitive-pl adjective); `spam_hidden_sg/pl` is vestigial, test-only).
+New `_mid` keys reuse the EN plural text (EN ignores `mid`).
+
+**Live language switch (plan §7.4 — the Settings page):** the Settings View is built once at
+bootstrap and reused by `route_change`, so the old `_on_language_select` only refreshed the
+language dropdown itself. It now calls `await settings_enter(ctx)`, and `settings_enter`
+was expanded to re-render **all** registered chrome — AppBar title, the 3 section headings,
+the About card (title/tagline/desc), theme label, experience label+option-texts+description,
+and the language dropdown — from the just-synced `ctx.lang`. The 7 newly-held Text controls
+are registered in `ctx.controls["settings_*"]`. Headlessly proven by
+`test_settings_enter_live_switch_flips_all_chrome` (drive the enter-hook in RU, assert every
+control flips, then EN round-trip) — the reliable route, since the Flet-web Dropdown popup
+can't be driven via semantics (playbook §6/§12); EN+RU rendering of every Phase-5 screen was
+confirmed in-browser with 0 console errors/warnings.
+
+**Final AST exception inventory (30 hits, all technical — 0 user chrome):** brand `Solana`
+(`app.py`); network identifiers `mainnet-beta`/`testnet`/`devnet` (`nft.py` checkboxes +
+`devtools.py` sim/rpc dropdown option texts — Phase-2 convention); `devtools.py` rpc dropdown
+default `value=`s (`mainnet`/`confirmed`/`getBalance`) + commitment values
+(`processed`/`confirmed`/`finalized`) + RPC method option texts (`getBalance (address)` …) —
+Solana RPC identifiers; `priority_fee.py` slider placeholder `{value}` + Dev unit
+`µLamports / CU`; token/LST Dropdown *values* `SOL`/`USDC` (`swap.py`), `JitoSOL`
+(`staking.py`); `walletconnect.py` brand/config label `WalletConnect projectId` + the two
+Dev-only diagnostic panels `Simulation logs:` / `Raw session/request JSON:`; `devtools.py`
+`Simulation logs:` (mirrors the walletconnect Phase-4 Dev-diagnostic convention — the
+`_sim_row` output labels `Status`/`Fee`/`Programs`/`SOL Δ…` and the storage key/value dump are
+also diagnostic, left untranslated). Debug `print(...)` logs everywhere untouched.
+
+**Definition of Done (all green):** AST = 0 user-facing literals (30 documented technical
+exceptions); 18 offline suites (~680 checks incl. `test_i18n` 64 + `test_settings_ui` 53) +
+`git diff --check` clean; Playwright EN+RU 0 console errors across PIN-gate/homepage/More/
+Settings/Storage/Sim/Raw-key screens, language persists across bootstrap; live-switch rebuild
+proven headlessly; `flet build apk` succeeds (i18n.py pure-Python, 0 new deps — APK ~90 MB).
 
 ## Android APK build + release signing
 
