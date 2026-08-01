@@ -136,7 +136,8 @@ def _render_preview(ctx: AppContext, preview: dict, show_program_ids: bool = Fal
         if show_program_ids:
             lines.append(ctx.t("sim_unverified_list", progs=", ".join(decoded["unknown_programs"])))
         else:
-            lines.append(ctx.tp("unverified_prog_pl", "unverified_prog_sg", len(decoded['unknown_programs'])))
+            lines.append(ctx.tp("unverified_prog_pl", "unverified_prog_sg",
+                                len(decoded['unknown_programs']), mid="unverified_prog_mid"))
     sim = preview.get("simulation") or {}
     if sim:
         lines.append(ctx.t("sim_pred_status", val=sim.get("status")))

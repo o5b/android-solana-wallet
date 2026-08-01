@@ -149,9 +149,11 @@ class AppContext:
         """
         return _translate(msg_key, self.lang, **fmt)
 
-    def tp(self, key_plural: str, key_singular: str, n: int, **fmt) -> str:
+    def tp(self, key_plural: str, key_singular: str, n: int, *, mid: str | None = None,
+           **fmt) -> str:
         """Plural-aware translate using the session language.
 
-        Mirrors :func:`ui.i18n.tp` (RU: ``n%10==1 and n%100!=11`` -> singular).
+        Mirrors :func:`ui.i18n.tp`: RU 1 -> singular, 2-4 -> ``mid`` (when given),
+        else plural. EN is always plural.
         """
-        return _translate_plural(key_plural, key_singular, n, self.lang, **fmt)
+        return _translate_plural(key_plural, key_singular, n, self.lang, mid=mid, **fmt)

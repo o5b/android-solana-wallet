@@ -70,9 +70,9 @@ def build_settings_page(ctx: AppContext) -> flet.View:
             else flet.ThemeMode.LIGHT
         )
         theme_control.label = (
-            "Light theme"
+            ctx.t("theme_light")
             if page.theme_mode == flet.ThemeMode.LIGHT
-            else "Dark theme"
+            else ctx.t("theme_dark")
         )
         if page.theme_mode == flet.ThemeMode.LIGHT:
             await page.shared_preferences.set("theme_mode", "LIGHT")
@@ -81,9 +81,11 @@ def build_settings_page(ctx: AppContext) -> flet.View:
         page.update()
 
     theme_control = flet.Switch(
-        label="Light theme"
-        if page.theme_mode == flet.ThemeMode.LIGHT
-        else "Dark theme",
+        label=(
+            ctx.t("theme_light")
+            if page.theme_mode == flet.ThemeMode.LIGHT
+            else ctx.t("theme_dark")
+        ),
         on_change=theme_changed,
     )
 
@@ -91,37 +93,28 @@ def build_settings_page(ctx: AppContext) -> flet.View:
     async def _apply_experience(mode: str) -> None:
         mode = await set_experience(page, mode)
         experience_dd.value = mode
-        experience_desc.value = experience_description(mode)
+        experience_desc.value = experience_description(mode, ctx.lang)
         page.update()
 
     def _show_dev_warning(new_mode, prev_mode):
         dlg = flet.AlertDialog(
             modal=True,
-            title=flet.Text("Enable Developer mode?"),
+            title=flet.Text(ctx.t("dev_mode_q")),
             content=flet.Column(
                 [
-                    flet.Text(
-                        "Developer mode unlocks raw, potentially destructive tools: "
-                        "the storage inspector, raw-key export, simulation details and more.",
-                        size=12,
-                    ),
-                    flet.Text(
-                        "These can expose private keys or wipe local data if misused. "
-                        "Only enable this if you know what you are doing.",
-                        size=12,
-                        color=flet.Colors.GREY_700,
-                    ),
+                    flet.Text(ctx.t("dev_mode_desc1"), size=12),
+                    flet.Text(ctx.t("dev_mode_desc2"), size=12, color=flet.Colors.GREY_700),
                 ],
                 spacing=6,
                 tight=True,
             ),
             actions=[
                 flet.TextButton(
-                    "Cancel",
+                    ctx.t("cancel"),
                     on_click=lambda ev: _cancel_dev_warning(dlg, prev_mode),
                 ),
                 flet.TextButton(
-                    "Enable Developer",
+                    ctx.t("dev_mode_enable"),
                     style=flet.ButtonStyle(color=flet.Colors.RED),
                     on_click=lambda ev: asyncio.create_task(
                         _confirm_dev_warning(dlg, new_mode)
@@ -156,16 +149,16 @@ def build_settings_page(ctx: AppContext) -> flet.View:
         await _apply_experience(new_mode)
 
     experience_dd = flet.Dropdown(
-        label="Experience level",
+        label=ctx.t("experience_level"),
         options=[
-            flet.dropdown.Option(key=m, text=experience_label(m)) for m in MODES
+            flet.dropdown.Option(key=m, text=experience_label(m, ctx.lang)) for m in MODES
         ],
         value=SIMPLE,
         dense=True,
         on_select=_on_experience_select,
     )
     experience_desc = flet.Text(
-        experience_description(SIMPLE), size=11, color=flet.Colors.GREY_700,
+        experience_description(SIMPLE, ctx.lang), size=11, color=flet.Colors.GREY_700,
     )
 
     # ---- Language selector (en / ru) --------------------------------------
@@ -174,17 +167,12 @@ def build_settings_page(ctx: AppContext) -> flet.View:
     # reads, so the switch is live once ``ctx.lang`` is updated here; the
     # option labels are re-rendered in the newly-selected language too.
     async def _on_language_select(e):
+        # Persist the new language, then rebuild the whole Settings chrome via
+        # settings_enter so EVERY localized control (theme label, headings,
+        # About card, experience labels/desc, language dd) flips live — not just
+        # the language dropdown (plan §7.4: switch works without a restart).
         ctx.lang = await set_lang(page, language_dd.value)
-        _refresh_language_dd()
-        page.update()
-
-    def _refresh_language_dd():
-        language_dd.options = [
-            flet.dropdown.Option(key=lg, text=language_display_name(lg, ctx.lang))
-            for lg in LANGS
-        ]
-        language_dd.value = ctx.lang
-        language_dd.label = ctx.t("language")
+        await settings_enter(ctx)
 
     language_dd = flet.Dropdown(
         label=ctx.t("language"),
@@ -197,16 +185,33 @@ def build_settings_page(ctx: AppContext) -> flet.View:
         on_select=_on_language_select,
     )
 
+    # Dynamic Text controls held by reference so settings_enter can re-render
+    # them in the current language on a live language switch (plan §7.4).
+    appbar_title = flet.Text(ctx.t("settings"))
+    appearance_h = flet.Text(ctx.t("appearance"), size=18, weight=flet.FontWeight.BOLD)
+    about_h = flet.Text(ctx.t("about"), size=18, weight=flet.FontWeight.BOLD)
+    about_title = flet.Text(ctx.t("app_title"), size=15, weight=flet.FontWeight.BOLD)
+    about_tagline = flet.Text(ctx.t("about_tagline"), size=11, color=flet.Colors.GREY_700)
+    about_desc = flet.Text(ctx.t("about_desc"), size=11, color=flet.Colors.GREY_700)
+    experience_h = flet.Text(ctx.t("experience_level"), size=18, weight=flet.FontWeight.BOLD)
+
     # Register the long-lived controls so settings_enter can read them back.
     ctx.controls["theme_control"] = theme_control
     ctx.controls["experience_dd"] = experience_dd
     ctx.controls["experience_desc"] = experience_desc
     ctx.controls["language_dd"] = language_dd
+    ctx.controls["settings_appbar_title"] = appbar_title
+    ctx.controls["settings_appearance_h"] = appearance_h
+    ctx.controls["settings_about_h"] = about_h
+    ctx.controls["settings_about_title"] = about_title
+    ctx.controls["settings_about_tagline"] = about_tagline
+    ctx.controls["settings_about_desc"] = about_desc
+    ctx.controls["settings_experience_h"] = experience_h
 
     return flet.View(
         route="settings-page",
         appbar=flet.AppBar(
-            title=flet.Text("Settings"),
+            title=appbar_title,
             color="white",
             bgcolor="#1da1f2",
             leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
@@ -217,7 +222,7 @@ def build_settings_page(ctx: AppContext) -> flet.View:
         controls=[
             flet.Column(
                 [
-                    flet.Text("Appearance", size=18, weight=flet.FontWeight.BOLD),
+                    appearance_h,
                     flet.Card(
                         content=flet.Container(
                             padding=12,
@@ -240,26 +245,23 @@ def build_settings_page(ctx: AppContext) -> flet.View:
                         )
                     ),
                     flet.Divider(),
-                    flet.Text("About", size=18, weight=flet.FontWeight.BOLD),
+                    about_h,
                     flet.Card(
                         content=flet.Container(
                             padding=12,
                             width=440,
                             content=flet.Column(
                                 [
-                                    flet.Text("Solana Wallet", size=15, weight=flet.FontWeight.BOLD),
-                                    flet.Text("Hand-rolled Solana wallet (Python + Flet).",
-                                              size=11, color=flet.Colors.GREY_700),
-                                    flet.Text("All blockchain logic is implemented from scratch "
-                                              "(no solana-py / solders).",
-                                              size=11, color=flet.Colors.GREY_700),
+                                    about_title,
+                                    about_tagline,
+                                    about_desc,
                                 ],
                                 spacing=2,
                             ),
                         )
                     ),
                     flet.Container(height=8),
-                    flet.Text("Experience level", size=18, weight=flet.FontWeight.BOLD),
+                    experience_h,
                     flet.Card(
                         content=flet.Container(
                             padding=12,
@@ -295,12 +297,35 @@ async def settings_enter(ctx: AppContext) -> None:
     language set via localStorage / a fresh bootstrap).
     """
     page = ctx.page
-    mode = await get_experience(page)
-    ctx.controls["experience_dd"].value = mode
-    ctx.controls["experience_desc"].value = experience_description(mode)
-    # Sync the language cache + dropdown to the persisted value.
+    # Sync the language cache FIRST so every ctx.t(...) below uses the current
+    # language (this hook is also the live language-switch rebuild path).
     ctx.lang = await get_lang(page)
-    language_dd = ctx.controls["language_dd"]
+    mode = await get_experience(page)
+    c = ctx.controls
+    # Section headings + About card + AppBar title (all re-rendered live).
+    c["settings_appbar_title"].value = ctx.t("settings")
+    c["settings_appearance_h"].value = ctx.t("appearance")
+    c["settings_about_h"].value = ctx.t("about")
+    c["settings_about_title"].value = ctx.t("app_title")
+    c["settings_about_tagline"].value = ctx.t("about_tagline")
+    c["settings_about_desc"].value = ctx.t("about_desc")
+    c["settings_experience_h"].value = ctx.t("experience_level")
+    # Theme label tracks page.theme_mode in the current language.
+    c["theme_control"].label = (
+        ctx.t("theme_light")
+        if page.theme_mode == flet.ThemeMode.LIGHT
+        else ctx.t("theme_dark")
+    )
+    # Experience dropdown (label + option texts) + description.
+    exp_dd = c["experience_dd"]
+    exp_dd.label = ctx.t("experience_level")
+    exp_dd.options = [
+        flet.dropdown.Option(key=m, text=experience_label(m, ctx.lang)) for m in MODES
+    ]
+    exp_dd.value = mode
+    c["experience_desc"].value = experience_description(mode, ctx.lang)
+    # Language dropdown (options + label) in the current language.
+    language_dd = c["language_dd"]
     language_dd.options = [
         flet.dropdown.Option(key=lg, text=language_display_name(lg, ctx.lang))
         for lg in LANGS

@@ -9,6 +9,8 @@ Persisted in Flet ``shared_preferences`` under ``ui.experience`` (same pattern a
 """
 from __future__ import annotations
 
+from ui.i18n import DEFAULT_LANG, t as _t
+
 # ---- storage keys -----------------------------------------------------------
 EXPERIENCE_KEY = "ui.experience"
 DEV_WARNING_SEEN_KEY = "ui.dev_warning_seen"
@@ -46,7 +48,10 @@ _MATRIX: dict[str, set[str]] = {
     "balance_raw": {DEVELOPER},              # raw mint/program_id dump + explorer link on tokens
 }
 
-# human labels / descriptions used by the Settings selector
+# human labels / descriptions used by the Settings selector. The text lives in
+# :mod:`ui.i18n` (``exp_*`` / ``exp_*_desc`` keys) so it switches with the UI
+# language; LABELS/DESCRIPTIONS stay as the canonical English fallback for any
+# caller that needs the untranslated form (e.g. data dumps / logs).
 LABELS = {
     SIMPLE: "Simple",
     PRO: "Pro",
@@ -62,18 +67,26 @@ DESCRIPTIONS = {
     ),
 }
 
+# i18n translation keys backing label()/description() (their ``en`` values match
+# LABELS/DESCRIPTIONS byte-for-byte, so a no-``lang`` call reproduces the legacy
+# English text exactly).
+_LABEL_KEYS = {SIMPLE: "exp_simple", PRO: "exp_pro", DEVELOPER: "exp_developer"}
+_DESC_KEYS = {SIMPLE: "exp_simple_desc", PRO: "exp_pro_desc", DEVELOPER: "exp_developer_desc"}
+
 
 def normalize(mode) -> str:
     """Return a valid mode string; unknown/empty -> Simple."""
     return mode if mode in MODES else DEFAULT_MODE
 
 
-def label(mode) -> str:
-    return LABELS.get(normalize(mode), LABELS[DEFAULT_MODE])
+def label(mode, lang: str | None = None) -> str:
+    """Localized mode label (``lang=None`` -> English, the legacy default)."""
+    return _t(_LABEL_KEYS[normalize(mode)], lang or DEFAULT_LANG)
 
 
-def description(mode) -> str:
-    return DESCRIPTIONS.get(normalize(mode), DESCRIPTIONS[DEFAULT_MODE])
+def description(mode, lang: str | None = None) -> str:
+    """Localized mode description (``lang=None`` -> English, the legacy default)."""
+    return _t(_DESC_KEYS[normalize(mode)], lang or DEFAULT_LANG)
 
 
 def feature(name, mode) -> bool:

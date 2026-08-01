@@ -258,6 +258,48 @@ def test_settings_enter_syncs_language():
     check("option ru label in ru", names[RUSSIAN] == language_display_name(RUSSIAN, RUSSIAN))
 
 
+def test_settings_enter_live_switch_flips_all_chrome():
+    """The live language-switch rebuild path (what the language dropdown's
+    on_select triggers: set ctx.lang + call settings_enter). Every localized
+    control — AppBar title, section headings, About card, theme label,
+    experience label/description, language dropdown — must flip to RU. This is
+    the reliable headless proof of plan §7.4 "switch works without a restart"
+    (the Flet-web dropdown popup itself can't be driven headlessly / via
+    semantics — see info/ui-testing-playbook.md §6, §12)."""
+    from ui.i18n import LANG_KEY, RUSSIAN, ENGLISH
+    page = MockPage()
+    page.shared_preferences._values[LANG_KEY] = RUSSIAN
+    ctx = make_ctx(page)
+    settings_mod.build_settings_page(ctx)
+    # Build time = English (default ctx.lang).
+    check("appbar en at build", ctx.controls["settings_appbar_title"].value == "Settings")
+    check("appearance en at build", ctx.controls["settings_appearance_h"].value == "Appearance")
+    check("about_title en at build", ctx.controls["settings_about_title"].value == "Solana Wallet")
+    check("exp_desc en at build",
+          ctx.controls["experience_desc"].value == settings_mod.experience_description(SIMPLE))
+    asyncio.run(settings_mod.settings_enter(ctx))
+    c = ctx.controls
+    # All chrome flipped to Russian by the enter-hook rebuild.
+    check("appbar ru", c["settings_appbar_title"].value == "Настройки")
+    check("appearance ru", c["settings_appearance_h"].value == "Оформление")
+    check("about_h ru", c["settings_about_h"].value == "О приложении")
+    check("about_title ru", c["settings_about_title"].value == "Кошелёк Solana")
+    check("about_tagline ru", c["settings_about_tagline"].value.startswith("Кошелёк Solana,"))
+    check("about_desc ru", "solana-py / solders" in c["settings_about_desc"].value)
+    check("experience_h ru", c["settings_experience_h"].value == "Уровень интерфейса")
+    check("theme label ru", c["theme_control"].label == "Светлая тема")
+    check("exp_dd label ru", c["experience_dd"].label == "Уровень интерфейса")
+    check("exp_desc ru",
+          c["experience_desc"].value == settings_mod.experience_description(SIMPLE, RUSSIAN))
+    check("lang dd label ru", c["language_dd"].label == "Язык")
+    # Flipping back to English via the same path restores English chrome.
+    page.shared_preferences._values[LANG_KEY] = ENGLISH
+    asyncio.run(settings_mod.settings_enter(ctx))
+    check("appbar back en", c["settings_appbar_title"].value == "Settings")
+    check("experience_h back en", c["settings_experience_h"].value == "Experience level")
+
+
+
 # ============================ experience switch drive =======================
 
 def _drive_on_select(ctx):
@@ -324,6 +366,7 @@ def main():
         test_settings_enter_unknown_mode_falls_back_to_simple,
         test_settings_enter_missing_key_defaults_simple,
         test_settings_enter_syncs_language,
+        test_settings_enter_live_switch_flips_all_chrome,
         test_switch_to_pro_persists_and_updates,
         test_dev_warning_flag_round_trip,
     ]

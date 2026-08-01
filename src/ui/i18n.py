@@ -167,6 +167,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "{n} spam tokens hidden — click to show",
         "ru": "{n} спам-токенов скрыто — нажмите, чтобы показать",
     },
+    # RU middle (2-4) form — "спам-токена скрыто". EN has no separate form, so
+    # it reuses the plural text (tp() only consults ``mid`` on the RU 2-4 range).
+    "spam_hidden_click_mid": {
+        "en": "{n} spam tokens hidden — click to show",
+        "ru": "{n} спам-токена скрыто — нажмите, чтобы показать",
+    },
     "spam_count_sg": {"en": "{n} spam hidden", "ru": "{n} спам скрыт"},
     "spam_count_pl": {"en": "{n} spam hidden", "ru": "{n} спама скрыто"},
     "suspicious_count_sg": {"en": "{n} suspicious", "ru": "{n} подозрительный"},
@@ -841,6 +847,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "⚠ {n} unverified programs",
         "ru": "⚠ {n} непроверенных программ",
     },
+    # RU middle (2-4) form — "непроверенные программы". EN reuses the plural.
+    "unverified_prog_mid": {
+        "en": "⚠ {n} unverified programs",
+        "ru": "⚠ {n} непроверенные программы",
+    },
     "sim_pred_status": {
         "en": "Predicted status: {val}",
         "ru": "Прогноз статуса: {val}",
@@ -851,6 +862,127 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "preview error: {val}",
         "ru": "ошибка предпросмотра: {val}",
     },
+    # --- experience.py (Simple/Pro/Developer labels + descriptions) - Phase 5 ---
+    "exp_simple": {"en": "Simple", "ru": "Простой"},
+    "exp_pro": {"en": "Pro", "ru": "Pro"},
+    "exp_developer": {"en": "Developer", "ru": "Разработчик"},
+    "exp_simple_desc": {
+        "en": "Send & receive SOL and view basic activity. Advanced WEB3 tools stay hidden.",
+        "ru": "Отправка и получение SOL, базовая активность. Продвинутые WEB3-инструменты скрыты.",
+    },
+    "exp_pro_desc": {
+        "en": "Everything in Simple, plus SPL tokens, NFTs, swaps, liquid staking and WalletConnect.",
+        "ru": "Всё из «Простой», плюс SPL-токены, NFT, обмен, ликвидный стейкинг и WalletConnect.",
+    },
+    "exp_developer_desc": {
+        "en": "Everything in Pro, plus raw developer tools (storage inspector, CSV export, "
+              "simulation details). Intended for power users.",
+        "ru": "Всё из «Pro», плюс инструменты разработчика (инспектор хранилища, экспорт CSV, "
+              "детали симуляции). Для опытных пользователей.",
+    },
+    # --- settings.py (Developer-mode dialog + About section) - Phase 5 ---
+    "dev_mode_q": {"en": "Enable Developer mode?", "ru": "Включить режим разработчика?"},
+    "dev_mode_desc1": {
+        "en": "Developer mode unlocks raw, potentially destructive tools: "
+              "the storage inspector, raw-key export, simulation details and more.",
+        "ru": "Режим разработчика открывает сырые и потенциально опасные инструменты: "
+              "инспектор хранилища, экспорт ключей, детали симуляции и др.",
+    },
+    "dev_mode_desc2": {
+        "en": "These can expose private keys or wipe local data if misused. "
+              "Only enable this if you know what you are doing.",
+        "ru": "При неосторожном использовании они могут раскрыть приватные ключи "
+              "или стереть локальные данные. Включайте, только если понимаете, что делаете.",
+    },
+    "dev_mode_enable": {"en": "Enable Developer", "ru": "Включить режим разработчика"},
+    "about_tagline": {
+        "en": "Hand-rolled Solana wallet (Python + Flet).",
+        "ru": "Кошелёк Solana, написанный с нуля (Python + Flet).",
+    },
+    "about_desc": {
+        "en": "All blockchain logic is implemented from scratch (no solana-py / solders).",
+        "ru": "Вся логика блокчейна реализована с нуля (без solana-py / solders).",
+    },
+    # --- devtools.py (Storage / Simulation / RPC / raw-key inspectors) - Phase 5 ---
+    # UI chrome only: page titles, intros, form labels, action buttons, status
+    # messages. Diagnostic output rows (_sim_row labels, JSON/log dumps) and the
+    # network/commitment/method dropdown *values* stay untranslated as technical
+    # identifiers (mirrors the Phase-2/4 Dev-diagnostic convention).
+    "sim_network": {"en": "Network", "ru": "Сеть"},
+    "sim_signer": {
+        "en": "Signer pubkey (optional — for relative SOL/token deltas)",
+        "ru": "Публичный ключ подписанта (необязательно — для относительных дельт SOL/токенов)",
+    },
+    "sim_tx": {"en": "Transaction (base64)", "ru": "Транзакция (base64)"},
+    "copy_raw_json": {"en": "Copy raw JSON", "ru": "Копировать сырой JSON"},
+    "sim_inspector": {"en": "Simulation inspector", "ru": "Инспектор симуляции"},
+    "sim_page_intro": {
+        "en": "Run the anti-phishing simulation on a base64 transaction WITHOUT signing. "
+              "Read-only (sigVerify=false, replaceRecentBlockhash=true).",
+        "ru": "Запустите антифишинг-симуляцию для транзакции в base64 БЕЗ подписи. "
+              "Только чтение (sigVerify=false, replaceRecentBlockhash=true).",
+    },
+    "analyze": {"en": "Analyze", "ru": "Анализировать"},
+    "simulating": {"en": "Simulating...", "ru": "Симуляция..."},
+    "sim_paste_first": {
+        "en": "paste a base64 transaction first",
+        "ru": "сначала вставьте транзакцию в base64",
+    },
+    "rpc_endpoint": {"en": "Endpoint", "ru": "Узел (endpoint)"},
+    "rpc_custom_url": {
+        "en": "Custom RPC URL (used when Endpoint = custom)",
+        "ru": "Свой RPC URL (используется при выборе «custom»)",
+    },
+    "rpc_custom_opt": {"en": "custom RPC URL", "ru": "свой RPC URL"},
+    "rpc_commitment": {"en": "Commitment", "ru": "Подтверждение"},
+    "rpc_method": {"en": "Method", "ru": "Метод"},
+    "rpc_input": {
+        "en": "Input (address or signature; ignored for getLatestBlockhash)",
+        "ru": "Ввод (адрес или подпись; игнорируется для getLatestBlockhash)",
+    },
+    "copy_response": {"en": "Copy response", "ru": "Копировать ответ"},
+    "rpc_inspector": {"en": "Raw RPC inspector", "ru": "Инспектор сырых RPC"},
+    "rpc_page_intro": {
+        "en": "Run read-only JSON-RPC calls directly against any endpoint + commitment. "
+              "Read-only methods only — never broadcasts.",
+        "ru": "Выполняйте read-only JSON-RPC запросы напрямую к любому узлу с выбранным "
+              "уровнем подтверждения. Только методы чтения — ничего не отправляется в сеть.",
+    },
+    "run": {"en": "Run", "ru": "Выполнить"},
+    "export_raw_keys": {"en": "Export raw keys", "ru": "Экспорт сырых ключей"},
+    "no_wallets_add_first": {
+        "en": "No wallets yet. Add a wallet first.",
+        "ru": "Кошельков пока нет. Сначала добавьте кошелёк.",
+    },
+    "rawkey_warning": {
+        "en": "These secrets grant FULL control of the wallet. Anyone with them "
+              "can drain all funds. Never share, screenshot, or paste into untrusted apps.",
+        "ru": "Эти секреты дают ПОЛНЫЙ контроль над кошельком. Любой, у кого они есть, "
+              "может украсть все средства. Никогда не передавайте их, не делайте скриншоты "
+              "и не вставляйте в ненадёжные приложения.",
+    },
+    "rawkey_hidden": {
+        "en": "(hidden — press Reveal)",
+        "ru": "(скрыто — нажмите «Показать»)",
+    },
+    "rawkey_watch_only": {
+        "en": "(watch-only wallet — no private key)",
+        "ru": "(кошелёк только для просмотра — без приватного ключа)",
+    },
+    "rawkey_locked": {
+        "en": "(app locked — unlock with PIN to reveal secrets)",
+        "ru": "(приложение заблокировано — разблокируйте PIN-кодом, чтобы показать секреты)",
+    },
+    "rawkey_empty": {"en": "(empty / not available)", "ru": "(пусто / недоступно)"},
+    "reveal": {"en": "Reveal", "ru": "Показать"},
+    "rawkey_label_priv": {"en": "Private key (hex)", "ru": "Приватный ключ (hex)"},
+    "rawkey_label_secret": {"en": "Secret key (base58)", "ru": "Секретный ключ (base58)"},
+    "rawkey_label_mnemonic": {
+        "en": "Mnemonic (12/24 words)",
+        "ru": "Мнемоника (12/24 слова)",
+    },
+    "rawkey_label_pub": {"en": "Public key (hex)", "ru": "Публичный ключ (hex)"},
+    "dev_storage_title": {"en": "DevTools: Storage", "ru": "DevTools: Хранилище"},
     # ...keys added as modules are migrated (Phases 4-5)...
 }
 
@@ -904,13 +1036,23 @@ def t(msg_key: str, lang: str | None = None, **fmt) -> str:
     return text.format(**fmt) if fmt else text
 
 
-def tp(key_plural: str, key_singular: str, n: int, lang: str | None = None, **fmt) -> str:
+def tp(key_plural: str, key_singular: str, n: int, lang: str | None = None, *,
+       mid: str | None = None, **fmt) -> str:
     """Plural-aware translate.
 
-    Simple RU rule: ``n%10==1 and n%100!=11`` -> singular, otherwise plural.
-    EN: always the plural form (as today). Add rules for other languages as
-    they are introduced.
-    Example: ``tp("spam_hidden_pl", "spam_hidden_sg", n, ctx.lang)``.
+    RU rule (3 forms when ``mid`` is given, else the legacy 2 forms):
+    * ``n%10==1 and n%100!=11``            -> ``key_singular`` (1, 21, 101…)
+    * ``mid`` set and ``2<=n%10<=4`` and
+      not ``10<=n%100<=20``                -> ``mid``         (2-4, 22-24…)
+    * otherwise                            -> ``key_plural``  (5-20, 11…)
+    EN: always the plural form. The ``mid`` key is optional and only consulted
+    on the 2-4 RU range, so existing 2-form call sites are unchanged (their
+    2-4 case still falls to ``key_plural`` — the accepted §7.3 simplification).
+    Example::
+
+        tp("spam_hidden_pl", "spam_hidden_sg", n, ctx.lang)
+        tp("unverified_prog_pl", "unverified_prog_sg", n, ctx.lang,
+           mid="unverified_prog_mid")
 
     ``n`` is injected into the format kwargs (overridden if the caller passes
     it explicitly), so templates can use a ``{n}`` placeholder.
@@ -921,6 +1063,8 @@ def tp(key_plural: str, key_singular: str, n: int, lang: str | None = None, **fm
     if lang == RUSSIAN:
         if n % 10 == 1 and n % 100 != 11:
             return t(key_singular, lang, **use)
+        if mid is not None and 2 <= n % 10 <= 4 and not (10 <= n % 100 <= 20):
+            return t(mid, lang, **use)
     return t(key_plural, lang, **use)
 
 

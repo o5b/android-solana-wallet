@@ -1032,7 +1032,8 @@ async def get_balance_button_click(ctx: AppContext, e):
                                     [
                                         flet.Icon(flet.Icons.WARNING, color=flet.Colors.RED, size=18),
                                         flet.Text(
-                                            ctx.tp("spam_hidden_click_pl", "spam_hidden_click_sg", spam_token_count),
+                                            ctx.tp("spam_hidden_click_pl", "spam_hidden_click_sg",
+                                                   spam_token_count, mid="spam_hidden_click_mid"),
                                             size=12, color=flet.Colors.RED,
                                         ),
                                     ],

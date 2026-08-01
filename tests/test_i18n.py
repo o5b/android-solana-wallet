@@ -134,6 +134,27 @@ def test_tp_none_lang_defaults_en_plural():
     check("tp None lang -> en plural", tp("spam_hidden_pl", "spam_hidden_sg", 1) == "1 spam tokens hidden")
 
 
+def test_tp_ru_middle_form():
+    # With an explicit `mid` key, the RU 2-4 range uses it (3-form rule).
+    check("tp ru n=2 -> mid", tp("unverified_prog_pl", "unverified_prog_sg", 2, "ru",
+                                 mid="unverified_prog_mid") == "⚠ 2 непроверенные программы")
+    check("tp ru n=3 -> mid", tp("unverified_prog_pl", "unverified_prog_sg", 3, "ru",
+                                 mid="unverified_prog_mid") == "⚠ 3 непроверенные программы")
+    check("tp ru n=4 -> mid", tp("unverified_prog_pl", "unverified_prog_sg", 4, "ru",
+                                 mid="unverified_prog_mid") == "⚠ 4 непроверенные программы")
+    # 11-14 are always plural even with mid (the 10-20 exception).
+    check("tp ru n=12 -> pl even with mid", tp("unverified_prog_pl", "unverified_prog_sg", 12, "ru",
+                                               mid="unverified_prog_mid") == "⚠ 12 непроверенных программ")
+    check("tp ru n=22 -> mid (2-4 of a larger number)", tp("unverified_prog_pl", "unverified_prog_sg", 22, "ru",
+                                                           mid="unverified_prog_mid") == "⚠ 22 непроверенные программы")
+    # Without mid, 2-4 still falls to plural (legacy 2-form, backward compat).
+    check("tp ru n=2 no mid -> pl", tp("unverified_prog_pl", "unverified_prog_sg", 2, "ru")
+          == "⚠ 2 непроверенных программ")
+    # EN ignores mid entirely.
+    check("tp en n=2 with mid -> pl", tp("unverified_prog_pl", "unverified_prog_sg", 2, "en",
+                                         mid="unverified_prog_mid") == "⚠ 2 unverified programs")
+
+
 # ============================ normalize / display ===========================
 
 def test_normalize():
@@ -259,6 +280,7 @@ def main():
         test_tp_ru_plural,
         test_tp_en_always_plural,
         test_tp_none_lang_defaults_en_plural,
+        test_tp_ru_middle_form,
         test_normalize,
         test_available_languages,
         test_language_display_name,

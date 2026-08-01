@@ -85,7 +85,7 @@ def build_sim_page(ctx: AppContext) -> flet.View:
     navbar = ctx.controls["navbar"]
     sim_out = flet.Column(spacing=4)
     sim_net_dd = flet.Dropdown(
-        label="Network",
+        label=ctx.t("sim_network"),
         width=420,
         value=_MAINNET,
         options=[
@@ -95,21 +95,21 @@ def build_sim_page(ctx: AppContext) -> flet.View:
         ],
     )
     sim_signer_tf = flet.TextField(
-        label="Signer pubkey (optional — for relative SOL/token deltas)",
+        label=ctx.t("sim_signer"),
         width=420, dense=True,
     )
     sim_tx_ta = flet.TextField(
-        label="Transaction (base64)",
+        label=ctx.t("sim_tx"),
         width=420, min_lines=3, max_lines=6, multiline=True,
     )
 
     async def sim_analyze_click(e):
         tx_b64 = (sim_tx_ta.value or "").strip()
         if not tx_b64:
-            sim_out.controls = [_sim_row("Error", "paste a base64 transaction first", color="red")]
+            sim_out.controls = [_sim_row("Error", ctx.t("sim_paste_first"), color="red")]
             page.update()
             return
-        sim_out.controls = [flet.Row([flet.ProgressRing(), flet.Text("Simulating...")],
+        sim_out.controls = [flet.Row([flet.ProgressRing(), flet.Text(ctx.t("simulating"))],
                                      alignment=flet.MainAxisAlignment.CENTER)]
         page.update()
         try:
@@ -166,7 +166,7 @@ def build_sim_page(ctx: AppContext) -> flet.View:
             )
         sim_out.controls.append(
             flet.ElevatedButton(
-                "Copy raw JSON", icon=flet.Icons.COPY,
+                ctx.t("copy_raw_json"), icon=flet.Icons.COPY,
                 on_click=lambda ev: page.clipboard.set(json.dumps(res, indent=2, default=str)),
             )
         )
@@ -175,7 +175,7 @@ def build_sim_page(ctx: AppContext) -> flet.View:
     return flet.View(
         route="sim-page",
         appbar=flet.AppBar(
-            title=flet.Text("Simulation inspector"),
+            title=flet.Text(ctx.t("sim_inspector")),
             color="white",
             bgcolor="#6d28d9",
             leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
@@ -184,17 +184,16 @@ def build_sim_page(ctx: AppContext) -> flet.View:
         horizontal_alignment=flet.CrossAxisAlignment.CENTER,
         scroll=flet.ScrollMode.AUTO,
         controls=[
-            flet.Text("Simulation inspector", size=18, weight=flet.FontWeight.BOLD),
+            flet.Text(ctx.t("sim_inspector"), size=18, weight=flet.FontWeight.BOLD),
             flet.Text(
-                "Run the anti-phishing simulation on a base64 transaction WITHOUT signing. "
-                "Read-only (sigVerify=false, replaceRecentBlockhash=true).",
+                ctx.t("sim_page_intro"),
                 size=11, color=flet.Colors.GREY_700, text_align=flet.TextAlign.CENTER,
             ),
             flet.Row([sim_net_dd], alignment=flet.MainAxisAlignment.CENTER),
             sim_signer_tf,
             sim_tx_ta,
             flet.Row(
-                [flet.ElevatedButton("Analyze", icon=flet.Icons.PLAY_ARROW, on_click=sim_analyze_click)],
+                [flet.ElevatedButton(ctx.t("analyze"), icon=flet.Icons.PLAY_ARROW, on_click=sim_analyze_click)],
                 alignment=flet.MainAxisAlignment.CENTER,
             ),
             flet.Divider(),
@@ -217,22 +216,22 @@ def build_rpc_page(ctx: AppContext) -> flet.View:
     navbar = ctx.controls["navbar"]
     rpc_out = flet.Column(spacing=4)
     rpc_source_dd = flet.Dropdown(
-        label="Endpoint",
+        label=ctx.t("rpc_endpoint"),
         width=420,
         value="mainnet",
         options=[
             flet.dropdown.Option(key="mainnet", text="mainnet-beta"),
             flet.dropdown.Option(key="testnet", text="testnet"),
             flet.dropdown.Option(key="devnet", text="devnet"),
-            flet.dropdown.Option(key="custom", text="custom RPC URL"),
+            flet.dropdown.Option(key="custom", text=ctx.t("rpc_custom_opt")),
         ],
     )
     rpc_custom_tf = flet.TextField(
-        label="Custom RPC URL (used when Endpoint = custom)",
+        label=ctx.t("rpc_custom_url"),
         width=420, dense=True, value="",
     )
     rpc_commit_dd = flet.Dropdown(
-        label="Commitment",
+        label=ctx.t("rpc_commitment"),
         width=200,
         value="confirmed",
         options=[
@@ -242,7 +241,7 @@ def build_rpc_page(ctx: AppContext) -> flet.View:
         ],
     )
     rpc_method_dd = flet.Dropdown(
-        label="Method",
+        label=ctx.t("rpc_method"),
         width=420,
         value="getBalance",
         options=[
@@ -254,7 +253,7 @@ def build_rpc_page(ctx: AppContext) -> flet.View:
         ],
     )
     rpc_input_tf = flet.TextField(
-        label="Input (address or signature; ignored for getLatestBlockhash)",
+        label=ctx.t("rpc_input"),
         width=420, dense=True,
     )
 
@@ -306,7 +305,7 @@ def build_rpc_page(ctx: AppContext) -> flet.View:
             _sim_row("Method", method),
             _sim_row("HTTP status", "200 OK" if pretty != "" else "?"),
             flet.ElevatedButton(
-                "Copy response", icon=flet.Icons.COPY,
+                ctx.t("copy_response"), icon=flet.Icons.COPY,
                 on_click=lambda ev: page.clipboard.set(pretty),
             ),
             flet.Container(
@@ -323,7 +322,7 @@ def build_rpc_page(ctx: AppContext) -> flet.View:
     return flet.View(
         route="rpc-page",
         appbar=flet.AppBar(
-            title=flet.Text("Raw RPC inspector"),
+            title=flet.Text(ctx.t("rpc_inspector")),
             color="white",
             bgcolor="#6d28d9",
             leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
@@ -332,10 +331,9 @@ def build_rpc_page(ctx: AppContext) -> flet.View:
         horizontal_alignment=flet.CrossAxisAlignment.CENTER,
         scroll=flet.ScrollMode.AUTO,
         controls=[
-            flet.Text("Raw RPC inspector", size=18, weight=flet.FontWeight.BOLD),
+            flet.Text(ctx.t("rpc_inspector"), size=18, weight=flet.FontWeight.BOLD),
             flet.Text(
-                "Run read-only JSON-RPC calls directly against any endpoint + commitment. "
-                "Read-only methods only — never broadcasts.",
+                ctx.t("rpc_page_intro"),
                 size=11, color=flet.Colors.GREY_700, text_align=flet.TextAlign.CENTER,
             ),
             rpc_source_dd,
@@ -344,7 +342,7 @@ def build_rpc_page(ctx: AppContext) -> flet.View:
             rpc_method_dd,
             rpc_input_tf,
             flet.Row(
-                [flet.ElevatedButton("Run", icon=flet.Icons.PLAY_ARROW, on_click=rpc_run_click)],
+                [flet.ElevatedButton(ctx.t("run"), icon=flet.Icons.PLAY_ARROW, on_click=rpc_run_click)],
                 alignment=flet.MainAxisAlignment.CENTER,
             ),
             flet.Divider(),
@@ -359,13 +357,13 @@ async def _rawkey_reveal_click(ctx: AppContext, wallet: dict, field: str, out_te
     """Decrypt one secret field into the paired (initially hidden) Text control."""
     page = ctx.page
     if not ctx.is_unlocked():
-        out_text.value = "(app locked — unlock with PIN to reveal secrets)"
+        out_text.value = ctx.t("rawkey_locked")
         out_text.color = flet.Colors.RED
         page.update()
         return
     dec = _decrypt(ctx, wallet)
     val = dec.get(field)
-    out_text.value = val if val else "(empty / not available)"
+    out_text.value = val if val else ctx.t("rawkey_empty")
     out_text.color = flet.Colors.BLACK87
     page.update()
 
@@ -387,7 +385,7 @@ async def rawkey_enter(ctx: AppContext) -> None:
     wallets = await load_wallets(ctx)
     if not wallets:
         el_rawkey_page.controls.append(
-            flet.Text("No wallets yet. Add a wallet first.", size=14, color=flet.Colors.GREY_600)
+            flet.Text(ctx.t("no_wallets_add_first"), size=14, color=flet.Colors.GREY_600)
         )
         page.update()
         return
@@ -398,8 +396,7 @@ async def rawkey_enter(ctx: AppContext) -> None:
                 [
                     flet.Icon(flet.Icons.WARNING_AMBER, color=flet.Colors.RED),
                     flet.Text(
-                        "These secrets grant FULL control of the wallet. Anyone with them "
-                        "can drain all funds. Never share, screenshot, or paste into untrusted apps.",
+                        ctx.t("rawkey_warning"),
                         size=11, color=flet.Colors.RED,
                     ),
                 ],
@@ -416,18 +413,18 @@ async def rawkey_enter(ctx: AppContext) -> None:
     for w in wallets:
         watch_only = w.get(WATCH_ONLY_FIELD)
         addr = w["address_base58"]
-        name = w.get("name", "Wallet")
+        name = w.get("name", ctx.t("wallet_dd_label"))
         rows: list = []
         for field, label in (
-            ("private_key_hex", "Private key (hex)"),
-            ("secret_key_base58", "Secret key (base58)"),
-            ("words", "Mnemonic (12/24 words)"),
-            ("public_key_hex", "Public key (hex)"),
+            ("private_key_hex", ctx.t("rawkey_label_priv")),
+            ("secret_key_base58", ctx.t("rawkey_label_secret")),
+            ("words", ctx.t("rawkey_label_mnemonic")),
+            ("public_key_hex", ctx.t("rawkey_label_pub")),
         ):
-            out = flet.Text("(hidden — press Reveal)", size=12, selectable=True,
+            out = flet.Text(ctx.t("rawkey_hidden"), size=12, selectable=True,
                             color=flet.Colors.GREY_600)
             if watch_only and field != "public_key_hex":
-                out.value = "(watch-only wallet — no private key)"
+                out.value = ctx.t("rawkey_watch_only")
                 rows.append(flet.Text(f"{label}:", size=12, weight=flet.FontWeight.BOLD))
                 rows.append(out)
                 continue
@@ -436,12 +433,12 @@ async def rawkey_enter(ctx: AppContext) -> None:
                     [
                         flet.Text(f"{label}:", size=12, weight=flet.FontWeight.BOLD),
                         flet.OutlinedButton(
-                            "Reveal", on_click=lambda ev, fld=field, o=out: asyncio.create_task(
+                            ctx.t("reveal"), on_click=lambda ev, fld=field, o=out: asyncio.create_task(
                                 _rawkey_reveal_click(ctx, w, fld, o)
                             ),
                         ),
                         flet.OutlinedButton(
-                            "Copy", icon=flet.Icons.COPY,
+                            ctx.t("copy"), icon=flet.Icons.COPY,
                             on_click=lambda ev, fld=field: asyncio.create_task(
                                 _rawkey_copy_click(ctx, w, fld)
                             ),
@@ -462,12 +459,12 @@ async def rawkey_enter(ctx: AppContext) -> None:
                                 [
                                     flet.Text(name, size=14, weight=flet.FontWeight.BOLD),
                                     flet.Text(
-                                        "  (watch-only)" if watch_only else "",
+                                        ctx.t("watch_only_tag") if watch_only else "",
                                         size=11, color=flet.Colors.ORANGE_800,
                                     ),
                                 ],
                             ),
-                            flet.Text(f"Address: {addr}", size=11, selectable=True,
+                            flet.Text(ctx.t("info_address", val=addr), size=11, selectable=True,
                                       color=flet.Colors.GREY_700),
                             flet.Divider(),
                             *rows,
@@ -487,7 +484,7 @@ def build_rawkey_page(ctx: AppContext) -> flet.View:
     return flet.View(
         route="raw-key-page",
         appbar=flet.AppBar(
-            title=flet.Text("Export raw keys"),
+            title=flet.Text(ctx.t("export_raw_keys")),
             color="white",
             bgcolor="#b91c1c",
             leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
@@ -496,7 +493,7 @@ def build_rawkey_page(ctx: AppContext) -> flet.View:
         horizontal_alignment=flet.CrossAxisAlignment.CENTER,
         scroll=flet.ScrollMode.AUTO,
         controls=[
-            flet.Text("Export raw keys", size=18, weight=flet.FontWeight.BOLD, color=flet.Colors.RED_700),
+            flet.Text(ctx.t("export_raw_keys"), size=18, weight=flet.FontWeight.BOLD, color=flet.Colors.RED_700),
             ctx.controls["el_rawkey_page"],
         ],
     )
@@ -559,7 +556,7 @@ async def dev_storage_enter(ctx: AppContext) -> None:
                 scroll=flet.ScrollMode.AUTO,
                 controls=[
                     flet.ElevatedButton(
-                        content="Delete",
+                        content=ctx.t("delete"),
                         on_click=lambda ev, k=key: asyncio.create_task(
                             _dev_storage_delete_click(ctx, k)
                         ),
@@ -581,7 +578,7 @@ def build_dev_storage_page(ctx: AppContext) -> flet.View:
     return flet.View(
         route="dev-storage-page",
         appbar=flet.AppBar(
-            title=flet.Text("DevTools: Storage"),
+            title=flet.Text(ctx.t("dev_storage_title")),
             color="white",
             bgcolor="cyan",
             leading=flet.IconButton(icon=flet.Icons.ARROW_BACK, on_click=view_pop),
