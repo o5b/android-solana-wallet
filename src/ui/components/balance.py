@@ -40,7 +40,7 @@ Coupling
   ``(ctx, e)`` signature, so the balance screen wires them as flet
   ``on_click`` callbacks via **named ``async def`` adapter closures defined
   inside** :func:`get_balance_button_click` (Group 5 rule #7: never lambdas
-  for async handlers — flet 0.82.2 only awaits handlers for which
+  for async handlers — Flet only awaits handlers for which
   ``inspect.iscoroutinefunction`` is True, and a ``lambda e: coro_call`` is a
   sync callable whose returned coroutine is silently dropped). This also
   restores the 5 adapter closures that Group 6c accidentally deleted alongside
@@ -309,7 +309,7 @@ async def wallet_info_click(ctx: AppContext, e):
                             width=140,
                             height=140,
                             fit=flet.BoxFit.CONTAIN,
-                            border_radius=flet.border_radius.all(8),
+                            border_radius=flet.BorderRadius(8, 8, 8, 8),
                         ),
                     ],
                     alignment=flet.MainAxisAlignment.CENTER,
@@ -377,7 +377,7 @@ async def go_to_address_page(ctx: AppContext, e):
 
     async def _copy_address(_ev):
         # Was `lambda e: page.clipboard.set(...)` — silently dropped the
-        # clipboard coroutine (flet 0.82.2 doesn't await lambda-returned
+        # clipboard coroutine (Flet doesn't await lambda-returned
         # coroutines). Now a proper async adapter.
         await page.clipboard.set(wallet["address_base58"])
 
@@ -465,7 +465,7 @@ async def go_to_address_page(ctx: AppContext, e):
             [
                 flet.Image(
                     src=qr_b64, width=160, height=160, fit=flet.BoxFit.CONTAIN,
-                    border_radius=flet.border_radius.all(8),
+                    border_radius=flet.BorderRadius(8, 8, 8, 8),
                 ),
             ],
             alignment=flet.MainAxisAlignment.CENTER,
@@ -682,7 +682,12 @@ async def get_history_button_click(ctx: AppContext, e):
                                 content=flet.Column(logs_controls, spacing=2, scroll=flet.ScrollMode.AUTO),
                                 height=100,
                                 padding=5,
-                                border=flet.border.all(1, "black12"),
+                                border=flet.Border(
+                                    top=flet.BorderSide(1, "black12"),
+                                    right=flet.BorderSide(1, "black12"),
+                                    bottom=flet.BorderSide(1, "black12"),
+                                    left=flet.BorderSide(1, "black12"),
+                                ),
                                 border_radius=5,
                             )
                             details_inner.append(
@@ -896,7 +901,7 @@ async def get_balance_button_click(ctx: AppContext, e):
                     height=100,
                     src="spl-token-placeholder.png",
                     fit=flet.BoxFit.CONTAIN,
-                    border_radius=flet.border_radius.all(10),
+                    border_radius=flet.BorderRadius(10, 10, 10, 10),
                 )
                 if "logo" in spl_token and spl_token["logo"]:
                     spl_token_logo.src = spl_token["logo"]
@@ -1039,10 +1044,10 @@ async def get_balance_button_click(ctx: AppContext, e):
                                     ],
                                 ),
                             ),
-                            padding=flet.padding.symmetric(vertical=2, horizontal=8),
-                            margin=flet.margin.only(top=4, bottom=4),
+                            padding=flet.Padding(left=8, top=2, right=8, bottom=2),
+                            margin=flet.Margin(left=0, top=4, right=0, bottom=4),
                             bgcolor=flet.Colors.with_opacity(0.08, flet.Colors.RED),
-                            border_radius=flet.border_radius.all(8),
+                            border_radius=flet.BorderRadius(8, 8, 8, 8),
                         ),
                         _spam_col,
                     ])
@@ -1179,10 +1184,10 @@ async def get_balance_button_click(ctx: AppContext, e):
                         ],
                         alignment=flet.MainAxisAlignment.CENTER,
                     ),
-                    padding=flet.padding.symmetric(vertical=6, horizontal=10),
-                    margin=flet.margin.only(bottom=6),
+                    padding=flet.Padding(left=10, top=6, right=10, bottom=6),
+                    margin=flet.Margin(left=0, top=0, right=0, bottom=6),
                     bgcolor=flet.Colors.with_opacity(0.08, flet.Colors.GREEN),
-                    border_radius=flet.border_radius.all(10),
+                    border_radius=flet.BorderRadius(10, 10, 10, 10),
                 )
             )
             if _note:
@@ -1208,10 +1213,10 @@ async def get_balance_button_click(ctx: AppContext, e):
                             ),
                         ],
                     ),
-                    padding=flet.padding.symmetric(vertical=4, horizontal=10),
-                    margin=flet.margin.only(bottom=6),
+                    padding=flet.Padding(left=10, top=4, right=10, bottom=4),
+                    margin=flet.Margin(left=0, top=0, right=0, bottom=6),
                     bgcolor=flet.Colors.with_opacity(0.06, flet.Colors.RED),
-                    border_radius=flet.border_radius.all(10),
+                    border_radius=flet.BorderRadius(10, 10, 10, 10),
                 )
             )
         _balance_controls.extend(tmp_balance_result)

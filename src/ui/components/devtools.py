@@ -161,13 +161,18 @@ def build_sim_page(ctx: AppContext) -> flet.View:
                 flet.Container(
                     content=flet.Column(log_controls, spacing=1, scroll=flet.ScrollMode.AUTO),
                     height=140, padding=5,
-                    border=flet.border.all(1, "black12"), border_radius=5,
+                    border=flet.Border(
+                        top=flet.BorderSide(1, "black12"),
+                        right=flet.BorderSide(1, "black12"),
+                        bottom=flet.BorderSide(1, "black12"),
+                        left=flet.BorderSide(1, "black12"),
+                    ), border_radius=5,
                 )
             )
         sim_out.controls.append(
             flet.ElevatedButton(
                 ctx.t("copy_raw_json"), icon=flet.Icons.COPY,
-                on_click=lambda ev: page.clipboard.set(json.dumps(res, indent=2, default=str)),
+                on_click=lambda ev: asyncio.create_task(page.clipboard.set(json.dumps(res, indent=2, default=str))),
             )
         )
         page.update()
@@ -306,13 +311,18 @@ def build_rpc_page(ctx: AppContext) -> flet.View:
             _sim_row("HTTP status", "200 OK" if pretty != "" else "?"),
             flet.ElevatedButton(
                 ctx.t("copy_response"), icon=flet.Icons.COPY,
-                on_click=lambda ev: page.clipboard.set(pretty),
+                on_click=lambda ev: asyncio.create_task(page.clipboard.set(pretty)),
             ),
             flet.Container(
                 content=flet.Text(pretty, selectable=True, size=10,
                                   color=flet.Colors.GREY_900, font_family="monospace" if False else None),
                 padding=6,
-                border=flet.border.all(1, "black12"),
+                border=flet.Border(
+                    top=flet.BorderSide(1, "black12"),
+                    right=flet.BorderSide(1, "black12"),
+                    bottom=flet.BorderSide(1, "black12"),
+                    left=flet.BorderSide(1, "black12"),
+                ),
                 border_radius=5,
                 width=460,
             ),
@@ -403,7 +413,12 @@ async def rawkey_enter(ctx: AppContext) -> None:
                 spacing=8,
             ),
             padding=10,
-            border=flet.border.all(1, flet.Colors.RED_200),
+            border=flet.Border(
+                top=flet.BorderSide(1, flet.Colors.RED_200),
+                right=flet.BorderSide(1, flet.Colors.RED_200),
+                bottom=flet.BorderSide(1, flet.Colors.RED_200),
+                left=flet.BorderSide(1, flet.Colors.RED_200),
+            ),
             border_radius=8,
             bgcolor=flet.Colors.RED_50,
             width=440,

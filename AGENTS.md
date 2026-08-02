@@ -338,7 +338,7 @@ closure capture of `page` / `session`):
 ### Async handlers
 
 - **Async `(ctx, e)` module handlers wired from `build_app` → named `async def`
-  adapter closures, NEVER `lambda`.** flet 0.82.2's `__fire_event` only awaits
+  adapter closures, NEVER `lambda`.** Flet's event dispatcher only awaits
   handlers that pass `inspect.iscoroutinefunction`; a plain
   `lambda ev: async_fn(ctx, ev)` is a sync lambda returning a coroutine → flet calls
   it, drops the coroutine, and the handler silently never runs (only signalled by a
@@ -591,21 +591,21 @@ in `pyproject.toml [project.dependencies]` (the source of truth — NOT repo-roo
 
 ### Build toolchain (already provisioned on this machine — `flet build apk` finds them)
 
-- Flutter **3.41.4** → `/home/oleg/flutter/3.41.4/bin/flutter`
+- Flutter **3.44.8** (Flet 0.86.5 downloads the required SDK automatically)
 - JDK **17.0.13+11** → `/home/oleg/java/17.0.13+11` (flet sets `--jdk-dir` to it)
 - Android SDK → `/home/oleg/Android/sdk` (use this, not `~/.android` which is empty).
   System `java` is JDK 21 — fine for `keytool`, but Gradle uses JDK 17.
 
 ### How flet packages Python for Android
 
-`serious_python` downloads a standalone CPython 3.12.9, installs requirements against an
+`serious_python` downloads a standalone CPython 3.12 runtime, installs requirements against an
 **extra PyPI index `https://pypi.flet.dev`** (pre-built Android wheels), and bundles
 `app/app.zip`. The pins must match what `pypi.flet.dev` serves for `cp312 android_24_*`:
 - `pillow==12.2.0` (not 12.3.0 — PyPI-only), `websockets==16.0` (not 16.1),
   `cryptography==43.0.1`, `PyNaCl==1.5.0`.
 - Check available versions before bumping a pin:
   `curl -s https://pypi.flet.dev/<pkg>/ | grep -oE '<pkg>-[0-9][^.]*'`.
-- `requires-python = >=3.12` (matches embedded CPython 3.12.9).
+- `requires-python = >=3.12,<3.13` (keeps the packaged runtime on the verified CPython 3.12 line).
 
 ### Release signing — use `apksigner`, NOT flet's `--android-signing-*` flags
 

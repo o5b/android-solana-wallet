@@ -1,9 +1,11 @@
 [project]
 name = "solana_wallet_v3"
-version = "0.1.0"
+version = "0.1.1"
 description = ""
 readme = "README.md"
-requires-python = ">=3.12"
+# Flet 0.86 otherwise selects its newest bundled runtime (currently 3.14).
+# Keep mobile cryptography dependencies on their verified CPython 3.12 ABI.
+requires-python = ">=3.12,<3.13"
 authors = [
   { name = "Flet developer", email = "you@example.com" }
 ]
@@ -14,7 +16,7 @@ dependencies = [
   "httpx==0.28.1",
   "PyNaCl==1.5.0",
   "typing_extensions==4.15.0",
-  "flet==0.82.2",
+  "flet==0.86.5",
   "qrcode==8.2",
   "pillow==12.2.0",
   "websockets==16.0"
@@ -24,6 +26,9 @@ dependencies = [
 # org name in reverse domain name notation, e.g. "com.mycompany".
 # Combined with project.name to build bundle ID for iOS and Android apps
 org = "com.mycompany"
+
+# Android versionCode must increase for an installed release APK to update.
+build_number = 2
 
 # project display name that is used as an app title on Android and iOS home screens,
 # shown in window titles and about app dialogs on desktop.
@@ -38,6 +43,11 @@ copyright = "Copyright (C) 2025 by Flet"
 [tool.flet.app]
 path = "src"
 
+[tool.flet.android]
+# mnemonic reads BIP39 word lists using paths relative to __file__. Flet 0.86
+# normally keeps pure-Python packages in a ZIP, so this package must be unpacked.
+extract_packages = ["mnemonic"]
+
 [tool.uv]
 dev-dependencies = [
   "base58==2.1.1",
@@ -46,14 +56,14 @@ dev-dependencies = [
   "httpx==0.28.1",
   "PyNaCl==1.5.0",
   "typing_extensions==4.15.0",
-  "flet==0.82.2"
+  "flet==0.86.5"
 ]
 
 [tool.poetry]
 package-mode = false
 
 [tool.poetry.group.dev.dependencies]
-flet = {extras = ["all"], version = "0.82.2"}
+flet = {extras = ["all"], version = "0.86.5"}
 
 [tool.flet.android.permission]
 "android.permission.INTERNET" = true

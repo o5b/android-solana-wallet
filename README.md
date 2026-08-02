@@ -230,6 +230,18 @@ Syntax-check a single module after edits:
 venv/bin/python -c "import py_compile; py_compile.compile('src/solana/<file>.py', doraise=True)"
 ```
 
+### Coverage
+
+The 18 offline suites (~680 checks) assert UI control construction, i18n
+(EN + RU, 437 keys), spam/scam filtering, the WalletConnect v2 relay protocol
+and crypto, priority-fee math, Token-2022 burn/close and rent accounting, and
+CSV history export. Core on-chain flows are verified end-to-end against the real
+Solana clusters — **devnet** (SOL / SPL / Token-2022 transfer, burn, burn + close
+rent refund, NFT gallery) and **mainnet** (Jupiter swap, liquid-staking stake and
+unstake round-trip). The wallet remains experimental and **not recommended for
+real funds**; the on-chain tests use separate throw-away wallets whose keys are
+gitignored.
+
 ## Demo
 
 #### Create New Wallet

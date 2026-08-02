@@ -22,6 +22,8 @@ no signer keys are needed here (the Send action delegates to the transfer page,
 which resolves the key itself).
 """
 
+import asyncio
+
 import flet
 
 from solana.nft import get_nfts
@@ -63,7 +65,7 @@ def _nft_tile(ctx: AppContext, nft: dict, wallet: dict, on_click) -> flet.TextBu
                         width=150,
                         height=150,
                         fit=flet.BoxFit.COVER,
-                        border_radius=flet.border_radius.all(8),
+                        border_radius=flet.BorderRadius(8, 8, 8, 8),
                     ),
                     flet.Text(
                         nft.get('name') or ctx.t('unnamed_nft'),
@@ -182,7 +184,7 @@ async def nft_enter(ctx: AppContext, open_spl_page) -> None:
                 flet.Text(ctx.t("nft_mint_label", mint=short_addr(nft.get('mint', ''))), size=11, selectable=True, color=flet.Colors.GREY_700),
                 flet.IconButton(
                     icon=flet.Icons.CONTENT_COPY, icon_size=16, tooltip=ctx.t("copy_mint"),
-                    on_click=lambda ev: page.clipboard.set(nft.get('mint', '')),
+                    on_click=lambda ev: asyncio.create_task(page.clipboard.set(nft.get('mint', ''))),
                 ),
             ],
             alignment=flet.MainAxisAlignment.SPACE_BETWEEN,
@@ -198,7 +200,7 @@ async def nft_enter(ctx: AppContext, open_spl_page) -> None:
                         flet.Image(
                             src=img_src, width=300, height=300,
                             fit=flet.BoxFit.CONTAIN,
-                            border_radius=flet.border_radius.all(10),
+                            border_radius=flet.BorderRadius(10, 10, 10, 10),
                         ),
                         flet.Text(
                             nft.get('collection') or nft.get('symbol') or '',

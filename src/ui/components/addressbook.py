@@ -130,7 +130,7 @@ def make_poisoning_banner() -> flet.Container:
     """
     return flet.Container(
         content=flet.Column([], spacing=2),
-        padding=flet.padding.symmetric(horizontal=10, vertical=6),
+        padding=flet.Padding(left=10, top=6, right=10, bottom=6),
         border_radius=6,
         visible=False,
     )

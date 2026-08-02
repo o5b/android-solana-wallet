@@ -211,6 +211,10 @@ async def _build_spl_token_detail(ctx: AppContext, data: dict) -> list:
 async def spl_token_arrow_drop_down_click(ctx: AppContext, e):
     """Expand a token's detail panel (arrow points down -> show detail)."""
     page = ctx.page
+    # Group 5 rule #7: named async def adapter (NOT a lambda) so flet awaits it.
+    async def on_arrow_up(ev):
+        await spl_token_arrow_drop_up_click(ctx, ev)
+
     try:
         data = e.control.data
         print(f'****** spl_token_arrow_drop_down_button_click >> data: {data}')
@@ -226,7 +230,7 @@ async def spl_token_arrow_drop_down_click(ctx: AppContext, e):
                                 flet.Icon(flet.Icons.ARROW_DROP_UP, size=50),
                             ],
                         ),
-                        on_click=lambda ev: spl_token_arrow_drop_up_click(ctx, ev),
+                        on_click=on_arrow_up,
                         data=data,
                     ),
                 ],
@@ -249,6 +253,10 @@ async def spl_token_arrow_drop_down_click(ctx: AppContext, e):
 async def spl_token_arrow_drop_up_click(ctx: AppContext, e):
     """Collapse a token's detail panel back to the arrow-down state."""
     page = ctx.page
+    # Group 5 rule #7: named async def adapter (NOT a lambda) so flet awaits it.
+    async def on_arrow_down(ev):
+        await spl_token_arrow_drop_down_click(ctx, ev)
+
     try:
         data = e.control.data
         e.control.parent.parent.controls.clear()
@@ -261,7 +269,7 @@ async def spl_token_arrow_drop_up_click(ctx: AppContext, e):
                                 flet.Icon(flet.Icons.ARROW_DROP_DOWN, size=50),
                             ],
                         ),
-                        on_click=lambda ev: spl_token_arrow_drop_down_click(ctx, ev),
+                        on_click=on_arrow_down,
                         data=data,
                     ),
                 ],
@@ -297,6 +305,18 @@ async def open_spl_token_page(ctx: AppContext, data):
     page = ctx.page
     el_spl_token_page = ctx.controls["el_spl_token_page"]
     el_spl_token_page.controls.clear()
+    # Group 5 rule #7: named async def adapters (NOT lambdas) so flet awaits
+    # them. A plain `lambda ev: fn(ctx, ev)` is a sync lambda returning a
+    # coroutine that flet drops -> "coroutine ... was never awaited".
+    async def on_transfer_spl(ev):
+        await transfer_spl_click(ctx, ev)
+
+    async def on_burn_spl(ev):
+        await burn_spl_click(ctx, ev)
+
+    async def on_burn_and_close(ev):
+        await burn_and_close_click(ctx, ev)
+
     amount_tf = flet.TextField(
         label=ctx.t("amount_field"),
         value=("1" if data.get('nft_prefill_amount') is not None else None),
@@ -353,13 +373,13 @@ async def open_spl_token_page(ctx: AppContext, data):
                 [
                     flet.ElevatedButton(
                         content=flet.Text(ctx.t("burn_btn")),
-                        on_click=lambda ev: burn_spl_click(ctx, ev),
+                        on_click=on_burn_spl,
                         data=burn_data,
                         disabled=False if (data['spl_amount'] and data['spl_amount'] > 0) else True,
                     ),
                     flet.ElevatedButton(
                         content=flet.Text(ctx.t("burn_all_close_btn")),
-                        on_click=lambda ev: burn_and_close_click(ctx, ev),
+                        on_click=on_burn_and_close,
                         data=close_data,
                     ),
                 ],
@@ -446,7 +466,7 @@ async def open_spl_token_page(ctx: AppContext, data):
                 [
                     flet.ElevatedButton(
                         content=flet.Text(ctx.t("transfer_token_btn")),
-                        on_click=lambda ev: transfer_spl_click(ctx, ev),
+                        on_click=on_transfer_spl,
                         data=transfer_data,
                     ),
                 ],
@@ -686,6 +706,13 @@ async def go_to_token_page_click(ctx: AppContext, e):
     Builds the SOL transfer page into ``ctx.controls["el_token_page"]``.
     """
     page = ctx.page
+    # Group 5 rule #7: named async def adapter (NOT a lambda) so flet awaits it.
+    # `lambda ev: transfer_sol_click(ctx, ev)` is a sync lambda returning a
+    # coroutine that flet drops -> "coroutine 'transfer_sol_click' was never
+    # awaited". See balance.py for the convention.
+    async def on_transfer_sol(ev):
+        await transfer_sol_click(ctx, ev)
+
     print(f'****** go_to_token_page_button_click >> e.control.data: {e.control.data}')
     data = e.control.data
     el_token_page = ctx.controls["el_token_page"]
@@ -788,7 +815,7 @@ async def go_to_token_page_click(ctx: AppContext, e):
                 [
                     flet.ElevatedButton(
                         content=flet.Text(ctx.t("transfer_sol_btn")),
-                        on_click=lambda ev: transfer_sol_click(ctx, ev),
+                        on_click=on_transfer_sol,
                         data=transfer_data,
                     ),
                 ],

@@ -14,7 +14,7 @@ Design
 * Debug ``print(...)`` logs are NEVER translated - they are developer output.
 
 Architecture decision: own dict-translator, NOT gettext/Babel. Reason: the APK
-build via serious_python (CPython 3.12.9, ``pypi.flet.dev`` index) already has
+build via serious_python (the CPython 3.12 line, ``pypi.flet.dev`` index) already has
 tight dependency constraints; gettext ``.mo`` bundling is an avoidable risk, and
 this module already mirrors the established :mod:`ui.experience` pattern
 (constants + async ``get``/``set`` pair). Pure Python, zero dependencies.

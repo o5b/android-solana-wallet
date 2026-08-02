@@ -337,7 +337,12 @@ async def _on_request(ctx: AppContext, session: dict, request: dict, preview: di
                     content=flet.Column(log_controls, spacing=1, scroll=flet.ScrollMode.AUTO),
                     height=120,
                     padding=5,
-                    border=flet.border.all(1, "black12"),
+                    border=flet.Border(
+                        top=flet.BorderSide(1, "black12"),
+                        right=flet.BorderSide(1, "black12"),
+                        bottom=flet.BorderSide(1, "black12"),
+                        left=flet.BorderSide(1, "black12"),
+                    ),
                     border_radius=5,
                 )
             )
@@ -365,7 +370,12 @@ async def _on_request(ctx: AppContext, session: dict, request: dict, preview: di
                 ),
                 height=160,
                 padding=5,
-                border=flet.border.all(1, "black12"),
+                border=flet.Border(
+                    top=flet.BorderSide(1, "black12"),
+                    right=flet.BorderSide(1, "black12"),
+                    bottom=flet.BorderSide(1, "black12"),
+                    left=flet.BorderSide(1, "black12"),
+                ),
                 border_radius=5,
             )
         )
